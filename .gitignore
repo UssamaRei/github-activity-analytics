@@ -1,0 +1,17 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.idea/
+.vscode/
+data/downloads/*
+!data/downloads/.gitkeep
+tmp/
+*.log
+*.jks
+*.pem
+*.key
+spark-warehouse/
+metastore_db/
+derby.log

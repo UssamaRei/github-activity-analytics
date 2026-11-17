@@ -1,0 +1,168 @@
+name: il05
+
+x-hadoop-env: &hadoop-env
+  CORE_CONF_fs_defaultFS: hdfs://namenode:9000
+  HDFS_CONF_dfs_replication: "1"
+  HDFS_CONF_dfs_permissions_enabled: "false"
+  HADOOP_HEAPSIZE: "256"
+
+services:
+  kafka:
+    image: apache/kafka:3.9.1
+    hostname: kafka
+    ports:
+      - "127.0.0.1:${KAFKA_PORT:-29092}:29092"
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:${KAFKA_PORT:-29092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_LOG_RETENTION_HOURS: "24"
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx256m
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    mem_limit: 768m
+    healthcheck:
+      test: [CMD-SHELL, "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  kafka-init:
+    image: apache/kafka:3.9.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: [/opt/kafka/bin/kafka-topics.sh]
+    command: [--bootstrap-server, kafka:9092, --create, --if-not-exists, --topic, github_events, --partitions, "1", --replication-factor, "1"]
+    mem_limit: 384m
+
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    hostname: namenode
+    ports:
+      - "127.0.0.1:${HDFS_UI_PORT:-9870}:9870"
+    environment:
+      <<: *hadoop-env
+      CLUSTER_NAME: il05
+      HDFS_CONF_dfs_namenode_safemode_threshold___pct: "0"
+    volumes:
+      - hdfs-name:/hadoop/dfs/name
+    mem_limit: 512m
+    healthcheck:
+      test: [CMD-SHELL, "curl -fsS http://localhost:9870/ >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    hostname: datanode
+    environment:
+      <<: *hadoop-env
+      SERVICE_PRECONDITION: namenode:9870
+      HDFS_CONF_dfs_datanode_hostname: datanode
+    depends_on:
+      namenode:
+        condition: service_healthy
+    volumes:
+      - hdfs-data:/hadoop/dfs/data
+    mem_limit: 512m
+    healthcheck:
+      test: [CMD-SHELL, "curl -fsS http://localhost:9864/ >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  hdfs-init:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    environment: *hadoop-env
+    depends_on:
+      namenode:
+        condition: service_healthy
+      datanode:
+        condition: service_healthy
+    command: [bash, /opt/project/storage/init_hdfs.sh]
+    volumes:
+      - ./storage:/opt/project/storage:ro
+    mem_limit: 384m
+
+  spark-cache-init:
+    image: ${SPARK_IMAGE:-apache/spark:3.5.1}
+    user: "0:0"
+    entrypoint: [chown, "185:0", /tmp/ivy]
+    volumes:
+      - spark-ivy:/tmp/ivy
+    mem_limit: 128m
+
+  spark-bronze:
+    image: ${SPARK_IMAGE:-apache/spark:3.5.1}
+    user: "185:0"
+    hostname: spark-bronze
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: github_events
+      BRONZE_PATH: hdfs://namenode:9000/lake/bronze/github_events
+      CHECKPOINT_PATH: hdfs://namenode:9000/checkpoints/github_events_bronze
+      HADOOP_USER_NAME: github
+      SPARK_LOCAL_IP: 0.0.0.0
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      hdfs-init:
+        condition: service_completed_successfully
+      spark-cache-init:
+        condition: service_completed_successfully
+    entrypoint: [/opt/spark/bin/spark-submit]
+    command:
+      - --master
+      - local[2]
+      - --driver-memory
+      - 768m
+      - --conf
+      - spark.jars.ivy=/tmp/ivy
+      - --conf
+      - spark.jars.ivySettings=/opt/project/storage/ivysettings.xml
+      - --conf
+      - spark.driver.host=spark-bronze
+      - --packages
+      - ${SPARK_KAFKA_PACKAGE:-org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1}
+      - /opt/project/storage/bronze_stream.py
+    volumes:
+      - ./storage:/opt/project/storage:ro
+      - spark-ivy:/tmp/ivy
+    mem_limit: 1536m
+    stop_grace_period: 30s
+
+  producer:
+    build:
+      context: .
+      dockerfile: docker/python/Dockerfile
+    image: il05-python:0.1.0
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: github_events
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./data:/app/data
+    command: [python, -m, ingestion.producer, --input, data/samples/github_events.jsonl, --interval, "0.25"]
+    mem_limit: 192m
+
+volumes:
+  kafka-data:
+  hdfs-name:
+  hdfs-data:
+  spark-ivy:
