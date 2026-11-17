@@ -150,9 +150,15 @@ only if needed. The default setup works without an `.env` file.
 
 ## GitHub handoff
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md). Create an empty GitHub repository, connect
-its URL as `origin`, then push `main`. Invite the other members as collaborators.
-Do not include a license without the group's agreement. The GitHub destination
-and visibility have not been selected yet.
+Repository: [UssamaRei/github-activity-analytics](https://github.com/UssamaRei/github-activity-analytics).
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before making changes. Each member should
+clone the repository and use their own Git account. Collaborator invitations and
+the division of responsibilities are to be decided by the group.
+
+```powershell
+git clone https://github.com/UssamaRei/github-activity-analytics.git
+cd github-activity-analytics
+docker compose up --build -d
+```
 
 Technical references are collected in [docs/architecture.md](docs/architecture.md).

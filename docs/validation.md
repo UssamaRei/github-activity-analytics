@@ -18,5 +18,6 @@ belongs to the future Silver Hudi layer. No deduplication or Hudi behavior has b
 claimed as tested in this version.
 
 To repeat the main checks, run the commands in the root README. GitHub Actions is
-configured for unit tests, dry-run ingestion, and Compose configuration validation;
-the workflow has not run remotely because the repository has not been pushed yet.
+configured for unit tests, dry-run ingestion, and Compose configuration validation.
+Its remote status is available in the repository's Actions tab after a push;
+the local results above do not establish hosted CI success.
