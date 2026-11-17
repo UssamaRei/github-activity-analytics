@@ -6,7 +6,6 @@ Université Ibn Zohr - Faculté des Sciences Agadir
 Master Excellence Ingénierie Logicielle - Module Big Data
 Professor: Yassine Oukdach - Academic year: 2026-2027
 
-Team: OUHARMOUCH Mustapha, TAYEBI Nada, SINA Oussama, MAAOUIYA Zeinebou.
 **Responsibilities are not assigned yet.**
 
 The final project analyzes public GitHub events to show repository, contributor,
