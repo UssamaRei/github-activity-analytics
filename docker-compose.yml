@@ -145,6 +145,45 @@ services:
     mem_limit: 1536m
     stop_grace_period: 30s
 
+  spark-silver:
+    image: ${SPARK_IMAGE:-apache/spark:3.5.1}
+    profiles: [silver]
+    user: "185:0"
+    hostname: spark-silver
+    environment:
+      BRONZE_PATH: hdfs://namenode:9000/lake/bronze/github_events
+      SILVER_PATH: hdfs://namenode:9000/lake/silver/github_events
+      QUARANTINE_PATH: hdfs://namenode:9000/lake/quarantine/github_events
+      HADOOP_USER_NAME: github
+      SPARK_LOCAL_IP: 0.0.0.0
+    depends_on:
+      hdfs-init:
+        condition: service_completed_successfully
+      spark-cache-init:
+        condition: service_completed_successfully
+    entrypoint: [/opt/spark/bin/spark-submit]
+    command:
+      - --master
+      - local[2]
+      - --driver-memory
+      - 768m
+      - --conf
+      - spark.jars.ivy=/tmp/ivy
+      - --conf
+      - spark.jars.ivySettings=/opt/project/storage/ivysettings.xml
+      - --conf
+      - spark.driver.host=spark-silver
+      - --py-files
+      - /opt/project/storage/silver_contract.py,/opt/project/storage/hudi_io.py
+      - --packages
+      - ${SPARK_HUDI_PACKAGE:-org.apache.hudi:hudi-spark3.5-bundle_2.12:0.15.0}
+      - /opt/project/storage/silver_job.py
+    volumes:
+      - ./storage:/opt/project/storage:ro
+      - ./analytics:/opt/project/analytics:ro
+      - spark-ivy:/tmp/ivy
+    mem_limit: 1536m
+
   producer:
     build:
       context: .
