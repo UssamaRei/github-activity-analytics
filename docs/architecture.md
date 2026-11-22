@@ -8,6 +8,8 @@ flowchart LR
     P --> K[Apache Kafka: github_events]
     K --> B[Spark Structured Streaming]
     B --> H[HDFS Bronze: original JSON lines]
+    H --> SI[Optional rerunnable Hudi Silver job]
+    SI --> Q[HDFS quarantine for invalid events]
 ```
 
 Docker Compose starts Kafka, a topic initializer, an HDFS NameNode and DataNode,
@@ -15,6 +17,8 @@ an HDFS directory initializer, a Spark dependency-cache initializer, the streami
 job, and a one-shot sample producer.
 The streaming consumer starts at earliest offsets, so it can read the sample even
 if the producer finishes first. Everything belongs to the Compose project `il05`.
+Silver is an explicit one-shot service (`docker compose run --rm spark-silver`);
+it is not started by the default `docker compose up`.
 
 HDFS is an explicit option in the general guide. The first development machine
 already has the Hadoop images, so this choice avoids downloading another storage
@@ -38,8 +42,10 @@ flowchart LR
     AF -. processing and quality .-> SP
 ```
 
-The full architecture is a target, not a claim that these services already exist.
-All later services must be integrated into the same `docker-compose.yml`.
+Silver is implemented as a rerunnable Hudi job and the Part 3 reader is available.
+Gold, Airflow, SQL serving, and Superset remain target components, not claims that
+these services already exist. Integrate later services into the same
+`docker-compose.yml`.
 
 ## Technical references
 
