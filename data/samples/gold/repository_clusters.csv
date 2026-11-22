@@ -1,0 +1,13 @@
+cluster_id,repo_name,event_count,active_contributors,push_share,pr_share,issue_share,cluster_label,period_start,period_end,k,silhouette
+1,fixture-automation/repo-1,60,1,1.0,0.0,0.0,"high activity, single contributor, mostly pushes",2025-01-01,2025-01-02,3,0.963
+1,fixture-automation/repo-2,47,1,1.0,0.0,0.0,"high activity, single contributor, mostly pushes",2025-01-01,2025-01-02,3,0.963
+1,fixture-automation/repo-3,57,1,1.0,0.0,0.0,"high activity, single contributor, mostly pushes",2025-01-01,2025-01-02,3,0.963
+1,fixture-automation/repo-4,50,1,1.0,0.0,0.0,"high activity, single contributor, mostly pushes",2025-01-01,2025-01-02,3,0.963
+0,fixture-community/repo-1,43,14,0.16279069767441862,0.4186046511627907,0.4186046511627907,"moderate activity, many contributors, mixed event types",2025-01-01,2025-01-02,3,0.963
+0,fixture-community/repo-2,38,14,0.18421052631578946,0.3684210526315789,0.4473684210526316,"moderate activity, many contributors, mixed event types",2025-01-01,2025-01-02,3,0.963
+0,fixture-community/repo-3,50,14,0.26,0.28,0.46,"moderate activity, many contributors, mixed event types",2025-01-01,2025-01-02,3,0.963
+0,fixture-community/repo-4,43,14,0.18604651162790697,0.4186046511627907,0.3953488372093023,"moderate activity, many contributors, mixed event types",2025-01-01,2025-01-02,3,0.963
+2,fixture-quiet/repo-1,5,2,0.4,0.0,0.6,"low activity, few contributors, mostly issues",2025-01-01,2025-01-02,3,0.963
+2,fixture-quiet/repo-2,6,2,0.3333333333333333,0.0,0.6666666666666666,"low activity, few contributors, mostly issues",2025-01-01,2025-01-02,3,0.963
+2,fixture-quiet/repo-3,3,2,0.3333333333333333,0.0,0.6666666666666666,"low activity, few contributors, mostly issues",2025-01-01,2025-01-02,3,0.963
+2,fixture-quiet/repo-4,5,2,0.6,0.0,0.4,"low activity, few contributors, mostly issues",2025-01-01,2025-01-02,3,0.963

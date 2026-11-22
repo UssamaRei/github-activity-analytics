@@ -1,0 +1,68 @@
+{
+  "computed_at": "2026-11-22T16:21:58.455869+00:00",
+  "period": {
+    "start": "2025-01-01",
+    "end": "2025-01-02",
+    "end_inclusive": true
+  },
+  "features": [
+    "event_count",
+    "active_contributors",
+    "push_share",
+    "pr_share",
+    "issue_share"
+  ],
+  "log1p": [
+    "event_count",
+    "active_contributors"
+  ],
+  "scaler": "StandardScaler(withMean, withStd)",
+  "seed": 42,
+  "k": 3,
+  "k_selection": "best silhouette",
+  "silhouette_by_k": {
+    "2": 0.6539,
+    "3": 0.963,
+    "4": 0.8667,
+    "5": 0.7495,
+    "6": 0.6916
+  },
+  "clusters": [
+    {
+      "cluster_id": 0,
+      "size": 4,
+      "label": "moderate activity, many contributors, mixed event types",
+      "means": {
+        "event_count": 43.5,
+        "active_contributors": 14.0,
+        "push_share": 0.198,
+        "pr_share": 0.371,
+        "issue_share": 0.43
+      }
+    },
+    {
+      "cluster_id": 1,
+      "size": 4,
+      "label": "high activity, single contributor, mostly pushes",
+      "means": {
+        "event_count": 53.5,
+        "active_contributors": 1.0,
+        "push_share": 1.0,
+        "pr_share": 0.0,
+        "issue_share": 0.0
+      }
+    },
+    {
+      "cluster_id": 2,
+      "size": 4,
+      "label": "low activity, few contributors, mostly issues",
+      "means": {
+        "event_count": 4.75,
+        "active_contributors": 2.0,
+        "push_share": 0.417,
+        "pr_share": 0.0,
+        "issue_share": 0.583
+      }
+    }
+  ]
+}

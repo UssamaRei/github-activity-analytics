@@ -15,3 +15,7 @@ tmp/
 spark-warehouse/
 metastore_db/
 derby.log
+
+# Analytics: real language metadata cache and local model settings
+data/cache/
+data/models/
