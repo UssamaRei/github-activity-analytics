@@ -1,12 +1,10 @@
 # IL-05 - GitHub Open Source Activity Analytics
 
-**v0.1: shared starter and working ingestion-to-Bronze pipeline.**
+**v0.2: ingestion-to-Bronze plus Part 4 Airflow/Superset integration.**
 
 Université Ibn Zohr - Faculté des Sciences Agadir
 Master Excellence Ingénierie Logicielle - Module Big Data
 Professor: Yassine Oukdach - Academic year: 2026-2027
-
-**Responsibilities are not assigned yet.**
 
 The final project analyzes public GitHub events to show repository, contributor,
 and language activity trends and cluster repositories with MLlib KMeans.
@@ -25,9 +23,35 @@ Implemented: bounded GH Archive downloader, raw-event Kafka producer, HDFS stora
 checkpointed Spark streaming, a synthetic fixture, tests, CI, and connection conventions.
 
 **Not implemented yet:** Hudi Silver/Gold, Spark analytical jobs and KMeans,
-language metadata enrichment, Airflow, Superset, and its SQL serving connection.
+and language metadata enrichment. Airflow, Superset and PostgreSQL serving are
+available through the `part4` Compose profile. Real Gold stays empty until the
+upstream jobs are connected.
 Empty Silver/Gold directories are reserved paths only. This is not the finished
 academic submission. See [roadmap](docs/roadmap.md).
+
+## Part 4: automation and dashboard
+
+```powershell
+docker compose --profile part4 up --build -d
+docker compose --profile part4 exec airflow python /opt/project/orchestration/show_credentials.py
+```
+
+The second command displays generated local credentials for username `student`.
+
+- Airflow: http://localhost:18082
+- Superset demo: http://localhost:8088/superset/dashboard/il05-demo/
+- Superset real Gold: http://localhost:8088/superset/dashboard/il05-gold/
+
+Trigger `il05_sample_ingestion` first. It publishes six events and checks their
+committed Bronze offsets. The full hourly DAG stays paused until the actual
+Silver/analytics jobs exist and reports missing dependencies explicitly.
+The demo has fictional data (85 events); real Gold starts empty. Read the
+[Airflow instructions](orchestration/README.md), [dashboard instructions](dashboard/README.md)
+and [integration contract](docs/part4-integration.md).
+
+The profile adds downloads and memory use. Base ingestion below works alone.
+Set `COMPOSE_PROFILES=part4` in a local `.env` if ordinary `docker compose up`
+should include the full local platform.
 
 ## Quick start (PowerShell or a terminal)
 
@@ -126,9 +150,11 @@ Kafka records, HDFS files, checkpoints, and cached connector jars.
 
 - `ingestion/`: downloader, JSONL reader, and Kafka producer.
 - `storage/`: working Bronze streaming job; Hudi layers to follow.
-- `analytics/`, `orchestration/`, `dashboard/`: documented next steps.
+- `analytics/`: interfaces for the upcoming Gold jobs.
+- `orchestration/`: Airflow workflows, private job runner and integration checks.
+- `dashboard/`: Gold export, transactional PostgreSQL publication and Superset dashboards.
 - `docs/`: [architecture](docs/architecture.md), [data contract](docs/data-contract.md), [roadmap](docs/roadmap.md).
-- `tests/`: meaningful ingestion and bounded-download checks.
+- `tests/`: ingestion, download, publication-contract and pipeline-handoff checks.
 
 The Compose network uses service names such as `kafka` and `namenode`.
 `localhost` inside a container points to that container, not another service.
@@ -152,7 +178,7 @@ only if needed. The default setup works without an `.env` file.
 Repository: [UssamaRei/github-activity-analytics](https://github.com/UssamaRei/github-activity-analytics).
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before making changes. Each member should
 clone the repository and use their own Git account. Collaborator invitations and
-the division of responsibilities are to be decided by the group.
+each member's responsibilities are agreed within the group.
 
 ```powershell
 git clone https://github.com/UssamaRei/github-activity-analytics.git

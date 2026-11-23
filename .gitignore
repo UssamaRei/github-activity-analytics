@@ -15,3 +15,7 @@ tmp/
 spark-warehouse/
 metastore_db/
 derby.log
+data/runtime/
+*.aux
+*.out
+*.toc

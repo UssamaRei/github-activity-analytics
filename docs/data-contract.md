@@ -30,6 +30,7 @@ These conventions describe how components connect. They do not assign work.
 | `hdfs://namenode:9000/lake/gold/repository_activity_hourly` | Planned: Hudi repository aggregates |
 | `hdfs://namenode:9000/lake/gold/language_activity_hourly` | Planned: Hudi language aggregates |
 | `hdfs://namenode:9000/lake/gold/repository_clusters` | Planned: KMeans results |
+| `hdfs://namenode:9000/lake/gold/contributor_activity_hourly` | Planned: contributor activity for the dashboard |
 
 The streaming query starts at earliest retained Kafka offsets only for its **first**
 run. Subsequent runs resume the checkpoint. Kafka keeps approximately 24 hours of
@@ -55,3 +56,11 @@ strategy when implementing Hudi, then record the decision here.
   Store unknown languages explicitly; do not infer a language from a repo name.
 - KMeans should group repositories by documented activity features; it is not a
   prediction model. Features, scaling, K, and validation remain to be selected.
+
+## Part 4 handoffs and SQL serving
+
+The runner checks committed Kafka offsets before downstream jobs start. Gold
+schemas, executable-job adapters and SQL publication are defined in
+[part4-integration.md](part4-integration.md). PostgreSQL serves checked Gold exports
+to Superset. A separate `demo` schema contains a labeled fixture; real `gold` starts
+empty until the actual Hudi outputs are provided by Parts 2/3.

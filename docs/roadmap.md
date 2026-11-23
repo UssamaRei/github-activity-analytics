@@ -1,6 +1,6 @@
 # Implementation roadmap
 
-No responsibilities have been assigned. The group will decide the split later.
+The group agrees individual responsibilities separately from this technical roadmap.
 
 1. **v0.1: shared foundation** - repository, event contract, sample, Kafka producer,
    Spark streaming to raw HDFS Bronze, local tests and integration verification.
@@ -8,8 +8,9 @@ No responsibilities have been assigned. The group will decide the split later.
    event-ID deduplication/upserts, quality reporting, replay/idempotency tests.
 3. **Gold analytics** - Spark SQL rankings and trends; repository language enrichment;
    Gold Hudi metrics; MLlib KMeans features, training, and evaluation.
-4. **Automation and visualization** - hourly Airflow ingestion, batch and quality DAGs,
-   retraining schedule, tested SQL serving connection, Superset dashboard.
+4. **Automation and visualization (v0.2)** - implemented sample/demo Airflow workflows,
+   hourly processing and quality dependencies, Hudi-export adapter, transactional SQL
+   serving and Superset dashboards. Full real-data integration awaits Parts 2/3.
 5. **Final integration and deliverables** - full Compose startup, recovery/replay demo,
    French cahier des charges, final report, slides, and presentation rehearsal.
 

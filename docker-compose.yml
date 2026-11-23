@@ -161,8 +161,154 @@ services:
     command: [python, -m, ingestion.producer, --input, data/samples/github_events.jsonl, --interval, "0.25"]
     mem_limit: 192m
 
+  part4-init:
+    profiles: [part4]
+    image: python:3.11-slim-bookworm
+    entrypoint: [python, /opt/il05/init_secrets.py]
+    volumes:
+      - ./orchestration/init_secrets.py:/opt/il05/init_secrets.py:ro
+      - part4-secrets:/secrets
+      - pipeline-runtime:/runtime
+    mem_limit: 128m
+
+  serving-db:
+    profiles: [part4]
+    image: postgres:16
+    environment:
+      POSTGRES_USER: il05
+      POSTGRES_DB: il05
+      POSTGRES_PASSWORD_FILE: /run/il05-secrets/postgres_password
+    depends_on:
+      part4-init:
+        condition: service_completed_successfully
+    volumes:
+      - serving-postgres:/var/lib/postgresql/data
+      - part4-secrets:/run/il05-secrets:ro
+      - ./orchestration/postgres_init.sh:/docker-entrypoint-initdb.d/01-il05.sh:ro
+      - ./orchestration/databases.sql:/opt/il05/databases.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U il05 -d analytics"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 384m
+
+  pipeline-runner:
+    profiles: [part4]
+    image: il05-runner:0.2.0
+    build:
+      context: .
+      dockerfile: docker/runner/Dockerfile
+    environment:
+      PROJECT_ROOT: /opt/project
+      PIPELINE_RUNTIME: /opt/project/data/runtime
+      PYTHONPATH: /opt/project
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: github_events
+      WEBHDFS_URL: http://namenode:9870
+      HADOOP_USER_NAME: github
+      HUDI_PACKAGE: org.apache.hudi:hudi-spark3.5-bundle_2.12:0.15.0
+    depends_on:
+      serving-db:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      hdfs-init:
+        condition: service_completed_successfully
+      spark-cache-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./orchestration:/opt/project/orchestration:ro
+      - ./dashboard:/opt/project/dashboard:ro
+      - ./ingestion:/opt/project/ingestion:ro
+      - ./storage:/opt/project/storage:ro
+      - ./analytics:/opt/project/analytics:ro
+      - ./data/samples:/opt/project/data/samples:ro
+      - pipeline-runtime:/opt/project/data/runtime
+      - spark-ivy:/tmp/ivy
+      - part4-secrets:/run/il05-secrets:ro
+    healthcheck:
+      test: [CMD, python3, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8090/health', timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+    mem_limit: 1536m
+
+  airflow:
+    profiles: [part4]
+    image: apache/airflow:3.4.0-python3.11
+    user: "50000:0"
+    command: [bash, /opt/project/orchestration/start_airflow.sh]
+    ports:
+      - "127.0.0.1:${AIRFLOW_PORT:-18082}:8080"
+    environment:
+      PYTHONPATH: /opt/project
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/project/orchestration/dags
+      AIRFLOW__CORE__PARALLELISM: "1"
+      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "1"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: student:admin
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/simple_auth_manager_passwords.json
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD: python /opt/project/orchestration/connection_uri.py airflow
+      AIRFLOW__CORE__FERNET_KEY_CMD: cat /run/il05-secrets/airflow_fernet_key
+      AIRFLOW__API_AUTH__JWT_SECRET_CMD: cat /run/il05-secrets/airflow_jwt_secret
+      AIRFLOW__API__WORKERS: "1"
+      AIRFLOW__DAG_PROCESSOR__PARSING_PROCESSES: "1"
+      AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: "30"
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow:8080/execution/
+      PIPELINE_RUNNER_URL: http://pipeline-runner:8090
+    depends_on:
+      pipeline-runner:
+        condition: service_healthy
+    volumes:
+      - airflow-home:/opt/airflow
+      - ./orchestration:/opt/project/orchestration:ro
+      - part4-secrets:/run/il05-secrets:ro
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/v2/monitor/health', timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    mem_limit: 2048m
+
+  superset:
+    profiles: [part4]
+    image: il05-superset:0.2.0
+    build:
+      context: .
+      dockerfile: docker/superset/Dockerfile
+    entrypoint: [bash, /opt/project/dashboard/start_superset.sh]
+    ports:
+      - "127.0.0.1:${SUPERSET_PORT:-8088}:8088"
+    environment:
+      PYTHONPATH: /opt/project
+      SUPERSET_CONFIG_PATH: /opt/project/dashboard/superset_config.py
+      FLASK_APP: superset.app:create_app()
+    depends_on:
+      pipeline-runner:
+        condition: service_healthy
+    volumes:
+      - superset-home:/app/superset_home
+      - ./dashboard:/opt/project/dashboard:ro
+      - ./orchestration:/opt/project/orchestration:ro
+      - part4-secrets:/run/il05-secrets:ro
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8088/health', timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    mem_limit: 1024m
+
 volumes:
   kafka-data:
   hdfs-name:
   hdfs-data:
   spark-ivy:
+  part4-secrets:
+  pipeline-runtime:
+  serving-postgres:
+  airflow-home:
+  superset-home:

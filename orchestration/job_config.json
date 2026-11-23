@@ -1,0 +1,7 @@
+{
+  "silver": {"script": "storage/silver_job.py", "args": ["--hour", "{hour}"]},
+  "silver_quality": {"script": "storage/check_silver.py", "args": ["--hour", "{hour}"]},
+  "repository_metrics": {"script": "analytics/repository_metrics.py", "args": ["--hour", "{hour}"]},
+  "language_metrics": {"script": "analytics/language_metrics.py", "args": ["--hour", "{hour}"]},
+  "cluster_repositories": {"script": "analytics/cluster_repositories.py", "args": ["--hour", "{hour}"]}
+}

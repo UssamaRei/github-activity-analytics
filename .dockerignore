@@ -4,3 +4,5 @@
 __pycache__
 tmp
 data/downloads
+data/runtime
+output

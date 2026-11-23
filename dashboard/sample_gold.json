@@ -1,0 +1,32 @@
+{
+  "description": "FICTIONAL DEMO DATA. Clusters are illustrative labels, not trained ML results.",
+  "tables": {
+    "repository_activity_hourly": [
+      {"hour_utc":"2025-01-01T10:00:00Z","repo_name":"demo-org/alpha","event_count":10,"push_count":7,"pr_count":2,"issue_count":1,"active_contributors":3},
+      {"hour_utc":"2025-01-01T10:00:00Z","repo_name":"demo-org/beta","event_count":20,"push_count":12,"pr_count":3,"issue_count":5,"active_contributors":4},
+      {"hour_utc":"2025-01-01T10:00:00Z","repo_name":"demo-org/gamma","event_count":5,"push_count":3,"pr_count":1,"issue_count":1,"active_contributors":2},
+      {"hour_utc":"2025-01-01T11:00:00Z","repo_name":"demo-org/alpha","event_count":15,"push_count":10,"pr_count":3,"issue_count":2,"active_contributors":4},
+      {"hour_utc":"2025-01-01T11:00:00Z","repo_name":"demo-org/beta","event_count":25,"push_count":15,"pr_count":4,"issue_count":6,"active_contributors":5},
+      {"hour_utc":"2025-01-01T11:00:00Z","repo_name":"demo-org/gamma","event_count":10,"push_count":6,"pr_count":2,"issue_count":2,"active_contributors":3}
+    ],
+    "language_activity_hourly": [
+      {"hour_utc":"2025-01-01T10:00:00Z","language":"Python","event_count":15,"active_repositories":2},
+      {"hour_utc":"2025-01-01T10:00:00Z","language":"Java","event_count":20,"active_repositories":1},
+      {"hour_utc":"2025-01-01T11:00:00Z","language":"Python","event_count":25,"active_repositories":2},
+      {"hour_utc":"2025-01-01T11:00:00Z","language":"Java","event_count":25,"active_repositories":1}
+    ],
+    "contributor_activity_hourly": [
+      {"hour_utc":"2025-01-01T10:00:00Z","actor_login":"demo-alice","event_count":15,"repo_count":3},
+      {"hour_utc":"2025-01-01T10:00:00Z","actor_login":"demo-bob","event_count":12,"repo_count":2},
+      {"hour_utc":"2025-01-01T10:00:00Z","actor_login":"demo-charlie","event_count":8,"repo_count":2},
+      {"hour_utc":"2025-01-01T11:00:00Z","actor_login":"demo-alice","event_count":20,"repo_count":3},
+      {"hour_utc":"2025-01-01T11:00:00Z","actor_login":"demo-bob","event_count":18,"repo_count":3},
+      {"hour_utc":"2025-01-01T11:00:00Z","actor_login":"demo-charlie","event_count":12,"repo_count":2}
+    ],
+    "repository_clusters": [
+      {"snapshot_utc":"2025-01-01T12:00:00Z","repo_name":"demo-org/alpha","cluster_id":0,"event_count":25,"active_contributors":4},
+      {"snapshot_utc":"2025-01-01T12:00:00Z","repo_name":"demo-org/beta","cluster_id":1,"event_count":45,"active_contributors":5},
+      {"snapshot_utc":"2025-01-01T12:00:00Z","repo_name":"demo-org/gamma","cluster_id":0,"event_count":15,"active_contributors":3}
+    ]
+  }
+}

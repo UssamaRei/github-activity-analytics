@@ -1,5 +1,7 @@
 """Stream a bounded sample of an hourly GH Archive file to JSONL."""
 
+from __future__ import annotations
+
 import argparse
 import gzip
 import os

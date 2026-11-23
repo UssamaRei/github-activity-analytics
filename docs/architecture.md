@@ -1,6 +1,6 @@
 # IL-05 architecture
 
-## Running in v0.1
+## Running in v0.2
 
 ```mermaid
 flowchart LR
@@ -8,6 +8,10 @@ flowchart LR
     P --> K[Apache Kafka: github_events]
     K --> B[Spark Structured Streaming]
     B --> H[HDFS Bronze: original JSON lines]
+    AF[Airflow: part4 profile] -. fixed HTTP jobs .-> R[Private job runner]
+    R -. publish and verify committed offsets .-> K
+    R --> D[PostgreSQL demo: synthetic fixture]
+    D --> SU[Superset demo dashboard]
 ```
 
 Docker Compose starts Kafka, a topic initializer, an HDFS NameNode and DataNode,
@@ -32,14 +36,21 @@ flowchart LR
     B --> SI[Hudi Silver: cleaned events and upserts]
     SI --> SP[Spark SQL and MLlib KMeans]
     SP --> GO[Hudi Gold: metrics and clusters]
-    GO --> Q[SQL serving connection: to be selected]
+    GO --> EX[Validated Spark export]
+    EX --> Q[PostgreSQL Gold serving snapshot]
     Q --> SU[Superset]
     AF[Airflow] -. download and ingestion .-> P
     AF -. processing and quality .-> SP
 ```
 
-The full architecture is a target, not a claim that these services already exist.
-All later services must be integrated into the same `docker-compose.yml`.
+Silver, analytics and KMeans remain to be implemented by Parts 2/3. Part 4 supplies
+the job adapters, exporter, SQL publisher, three DAGs and reproducible dashboards.
+The real Gold dashboard remains empty until upstream jobs supply valid results.
+All services use the same Compose network; Airflow does not mount a Docker socket.
+PostgreSQL serves a validated copy of the four Hudi Gold tables to Superset through
+a read-only account. Hudi remains the authoritative analytical storage.
+
+See [Part 4 handoffs](part4-integration.md) for exact schemas and commands.
 
 ## Technical references
 

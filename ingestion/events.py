@@ -1,5 +1,7 @@
 """Read JSONL without reserializing the original event bytes."""
 
+from __future__ import annotations
+
 import gzip
 import json
 from datetime import datetime
