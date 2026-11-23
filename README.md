@@ -21,7 +21,7 @@ Six fictional sample events (or a real GH Archive sample)
     -> HDFS Bronze (original JSON records)
 ```
 
-Implemented: bounded GH Archive downloader, raw-event Kafka producer, HDFS storage,
+Implemented: multi-hour GH Archive downloader, checkpointed Kafka publication, HDFS storage,
 checkpointed Spark streaming, a synthetic fixture, tests, CI, and connection conventions.
 
 **Not implemented yet:** Hudi Silver/Gold, Spark analytical jobs and KMeans,
@@ -80,20 +80,29 @@ A replay intentionally creates more raw records with the same event IDs in Bronz
 Silver will deduplicate/upsert them in the next iteration. Do not present duplicate
 raw events as additional unique GitHub activity.
 
-## Try a small real GH Archive sample
+## Download and publish selected GH Archive hours
 
-The downloader stops after the requested number of events instead of saving an
-entire hourly archive. The following uses a fixed historical hour in UTC:
+Use UTC hours in `YYYY-MM-DD-HH` format. This downloads up to 100 events
+per hour, then publishes and verifies the first hour.
 
 ```powershell
-docker compose run --rm --no-deps producer python -m ingestion.download --hour 2025-01-01-15 --limit 100 --output data/downloads/2025-01-01-15-sample.jsonl
-docker compose run --rm producer python -m ingestion.producer --input data/downloads/2025-01-01-15-sample.jsonl --limit 100
-python scripts/verify_bronze.py --expected data/downloads/2025-01-01-15-sample.jsonl
+docker compose run --rm --no-deps producer python -m ingestion.download --hour 2025-01-01-15 --hour 2025-01-01-16 --limit 100 --output-dir data/downloads
+docker compose run --rm producer python -m ingestion.producer --input data/downloads/2025-01-01-15-sample-100.jsonl --hour 2025-01-01-15 --manifest data/downloads/2025-01-01-15-sample-100.publish.json
+python scripts/verify_bronze.py --expected data/downloads/2025-01-01-15-sample-100.jsonl
 ```
 
-Choose another filename if the output already exists. All downloaded data is ignored
-by Git. GH Archive contains public activity across repositories; it is independent
-of the GitHub repository used to collaborate on this project.
+Repeat the publish command with the second hour and its corresponding paths.
+For a whole archive, use `--full-hour` instead of the download limit, replace
+`sample-100` with `full` in both publication paths, and leave off the producer
+limit. With `--output-dir`, rerunning the same download command reuses files
+already completed for that hour and volume. A single hour can still use
+`--output PATH` for a custom filename.
+
+The publish manifest records progress for the selected hour. If publication
+fails, rerun the same command to replay from the first event. A successful
+manifest lets the retry skip the completed publication. The [data contract](docs/data-contract.md)
+describes the scheduler interface, Kafka offsets, and replay behavior. See the
+[ingestion README](ingestion/README.md) for verification results.
 
 ## Fast local checks (no Docker services or pip packages required)
 
