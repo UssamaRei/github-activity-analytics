@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from analytics.fixtures import CLUSTER_PROFILES, REPOS_PER_PROFILE, SILVER_COLUMNS, cluster_fixture_rows, load_silver_rows
-from analytics.language_metrics import UNKNOWN, LanguageCache, TemporaryLookupError
+from analytics.language_metrics import UNKNOWN, LanguageCache, TemporaryLookupError, language_coverage
 
 HAS_SPARK = importlib.util.find_spec("pyspark") is not None
 
@@ -76,6 +76,26 @@ class LanguageCacheTests(unittest.TestCase):
             result = cache.resolve(["a/1", "a/2", "a/3"], max_requests=2)
             self.assertEqual(len(calls), 2)
             self.assertEqual(list(result.values()).count(UNKNOWN), 1)
+
+    def test_budget_goes_to_repos_in_given_priority_order(self):
+        with tempfile.TemporaryDirectory() as folder:
+            cache, calls = self.make_cache(folder, {"z/busy": "Rust", "a/quiet": "C"})
+            result = cache.resolve(["z/busy", "a/quiet"], max_requests=1)
+            # Not alphabetical: the first (busiest) repo gets the only lookup.
+            self.assertEqual(calls, ["z/busy"])
+            self.assertEqual(result, {"z/busy": "Rust", "a/quiet": UNKNOWN})
+
+    def test_rate_limit_stops_further_lookups(self):
+        with tempfile.TemporaryDirectory() as folder:
+            limited = TemporaryLookupError("HTTP 403", rate_limited=True)
+            cache, calls = self.make_cache(folder, {"a/1": limited, "a/2": "Go"})
+            cache.resolve(["a/1", "a/2"])
+            self.assertEqual(calls, ["a/1"])
+
+    def test_coverage_counts_events_not_repos(self):
+        counts = {"big/repo": 8, "small/1": 1, "small/2": 1}
+        languages = {"big/repo": "Python", "small/1": UNKNOWN}
+        self.assertEqual(language_coverage(counts, languages), (8, 10))
 
 
 @unittest.skipUnless(HAS_SPARK, "pyspark not installed")

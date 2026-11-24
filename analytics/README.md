@@ -83,7 +83,10 @@ for Part 4 to add, so edits to the shared `docker-compose.yml` stay coordinated.
   because quiet hours have no row). Null when there is no earlier row or it was 0.
 - **Rankings** use `rank()`: ties share a rank (1, 1, 3).
 - **Language** comes only from GitHub metadata; missing -> `unknown`, never guessed.
-  Temporary API failures are not cached so they are retried.
+  Temporary API failures are not cached so they are retried. Lookups go to the
+  busiest repositories first and stop at a rate limit; each run prints language
+  coverage (share of events with a known language). Set `GITHUB_TOKEN` (5,000
+  lookups/hour instead of 60) and a larger `--max-requests` for real data.
 - **KMeans features** are `log1p` counts + event-type shares, standardized; K chosen
   by silhouette (seed 42). Labels are generated from each cluster's mean features
   relative to the overall mean, and saved in the settings JSON.

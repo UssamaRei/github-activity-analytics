@@ -28,6 +28,17 @@ API = "https://api.github.com/repos/"
 class TemporaryLookupError(Exception):
     """Rate limit, network or server error: retry on a later run."""
 
+    def __init__(self, message: str, rate_limited: bool = False):
+        super().__init__(message)
+        self.rate_limited = rate_limited
+
+
+def language_coverage(repo_event_counts: dict, languages: dict) -> tuple[int, int]:
+    """Return (events with a known language, all events)."""
+    total = sum(repo_event_counts.values())
+    known = sum(n for repo, n in repo_event_counts.items() if languages.get(repo, UNKNOWN) != UNKNOWN)
+    return known, total
+
 
 def fetch_github_language(repo_name: str, token: str | None = None, timeout: float = 10) -> str | None:
     """Return the repository's primary language, or None if GitHub has none/404."""
@@ -40,7 +51,7 @@ def fetch_github_language(repo_name: str, token: str | None = None, timeout: flo
     except urllib.error.HTTPError as exc:
         if exc.code in (404, 451):  # deleted, renamed away, or blocked
             return None
-        raise TemporaryLookupError(f"{repo_name}: HTTP {exc.code}") from exc
+        raise TemporaryLookupError(f"{repo_name}: HTTP {exc.code}", rate_limited=exc.code in (403, 429)) from exc
     except (urllib.error.URLError, TimeoutError) as exc:
         raise TemporaryLookupError(f"{repo_name}: {exc}") from exc
 
@@ -53,11 +64,15 @@ class LanguageCache:
         self.failures: list[str] = []
 
     def resolve(self, repo_names, allow_fetch: bool = True, max_requests: int | None = None) -> dict:
-        """Return {repo_name: language or "unknown"} for every requested repo."""
+        """Return {repo_name: language or "unknown"} for every requested repo.
+
+        Repos are looked up in the order given, so pass the busiest first: when
+        the API budget runs out, the repos left unknown are the least active.
+        """
         token = os.getenv("GITHUB_TOKEN")
         requests = 0
         result = {}
-        for repo in sorted(set(repo_names)):
+        for repo in dict.fromkeys(repo_names):  # dedupe, keep priority order
             if repo not in self.entries and allow_fetch and (max_requests is None or requests < max_requests):
                 requests += 1
                 try:
@@ -65,6 +80,8 @@ class LanguageCache:
                     self.entries[repo] = {"language": language, "fetched_at": datetime.now(timezone.utc).isoformat()}
                 except TemporaryLookupError as exc:
                     self.failures.append(str(exc))
+                    if exc.rate_limited:
+                        allow_fetch = False  # more calls would fail too; retry next run
             language = self.entries.get(repo, {}).get("language")
             result[repo] = language or UNKNOWN
         return result
@@ -118,17 +135,26 @@ def main(argv=None):
     spark = build_spark("IL05-Language-Metrics")
     try:
         silver = load_silver(spark, args.source, args.silver)
-        repos = [row.repo_name for row in silver.select("repo_name").distinct().collect()]
+        # Busiest repositories first, so a limited API budget covers the most events.
+        counts = silver.dropDuplicates(["event_id"]).groupBy("repo_name").count()
+        repo_event_counts = {row.repo_name: row["count"] for row in counts.orderBy("count", ascending=False).collect()}
+        repos = list(repo_event_counts)
         if args.languages == "fixture":
             from analytics.fixtures import FICTIONAL_LANGUAGES
 
             languages = {repo: FICTIONAL_LANGUAGES.get(repo, UNKNOWN) for repo in repos}
         else:
             cache = LanguageCache(args.cache)
+            if not args.offline and not os.getenv("GITHUB_TOKEN"):
+                print("WARNING: GITHUB_TOKEN not set; GitHub allows only 60 lookups per hour")
             languages = cache.resolve(repos, allow_fetch=not args.offline, max_requests=args.max_requests)
             cache.save()
             if cache.failures:
                 print(f"WARNING: {len(cache.failures)} temporary lookup failures; retried next run")
+        known, total = language_coverage(repo_event_counts, languages)
+        known_repos = sum(1 for repo in repos if languages[repo] != UNKNOWN)
+        print(f"language coverage: {known}/{total} events ({known / max(total, 1):.0%}), "
+              f"{known_repos}/{len(repos)} repositories")
         result = add_growth(language_activity_hourly(silver, languages), keys=("language",))
         path = write_gold(result, "language_activity_hourly", args.output, args.format)
         print(f"wrote language_activity_hourly: {result.count()} rows -> {path}")
