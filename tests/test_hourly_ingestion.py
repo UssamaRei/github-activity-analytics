@@ -22,12 +22,9 @@ class HourlyDownloadTests(unittest.TestCase):
         compressed = gzip.compress(original)
         with tempfile.TemporaryDirectory() as folder:
             output = Path(folder) / "hour.jsonl"
-            with (
-                patch("ingestion.download.urlopen", side_effect=[
+            with patch("ingestion.download.urlopen", side_effect=[
                     io.BytesIO(compressed[:-8]), io.BytesIO(compressed)
-                ]) as fetch,
-                patch("ingestion.download.time.sleep") as sleep,
-            ):
+                ]) as fetch, patch("ingestion.download.time.sleep") as sleep:
                 self.assertEqual(download_sample(HOUR, output, limit=None), 6)
             self.assertEqual(fetch.call_count, 2)
             sleep.assert_called_once_with(1)
@@ -48,18 +45,14 @@ class HourlyDownloadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             args = ["download", "--hour", HOUR, "--hour", "2025-01-01-16", "--output-dir", folder]
             compressed = gzip.compress(SAMPLE.read_bytes())
-            with (
-                patch("sys.argv", args + ["--limit", "2"]),
-                patch("ingestion.download.urlopen", side_effect=lambda *a, **kw: io.BytesIO(compressed)) as fetch,
-            ):
+            with patch("sys.argv", args + ["--limit", "2"]), \
+                patch("ingestion.download.urlopen", side_effect=lambda *a, **kw: io.BytesIO(compressed)) as fetch:
                 download_main()
                 download_main()
             self.assertEqual(fetch.call_count, 2)
             self.assertEqual(len(list(Path(folder).glob("*-sample-2.jsonl"))), 2)
-            with (
-                patch("sys.argv", args + ["--full-hour"]),
-                patch("ingestion.download.urlopen", side_effect=lambda *a, **kw: io.BytesIO(compressed)),
-            ):
+            with patch("sys.argv", args + ["--full-hour"]), \
+                patch("ingestion.download.urlopen", side_effect=lambda *a, **kw: io.BytesIO(compressed)):
                 download_main()
             self.assertEqual(len(list(Path(folder).glob("*-full.jsonl"))), 2)
 
@@ -99,7 +92,8 @@ class PublicationTests(unittest.TestCase):
                 "first_offset": 10, "last_offset": 14, "records_sent": 3
             })
             self.assertEqual(complete["offsets"]["1"]["last_offset"], 15)
-            for call, raw in zip(retry.send.call_args_list, records, strict=True):
+            self.assertEqual(len(retry.send.call_args_list), len(records))
+            for call, raw in zip(retry.send.call_args_list, records):
                 self.assertEqual(call.args, ("github_events",))
                 self.assertEqual(call.kwargs, {
                     "key": json.loads(raw)["repo"]["name"].encode(), "value": raw

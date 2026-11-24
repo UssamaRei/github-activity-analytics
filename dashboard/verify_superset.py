@@ -1,12 +1,16 @@
 """Execute inside Superset to check authenticated chart queries and filtering."""
 
 import json
+import argparse
 from pathlib import Path
 
 import requests
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--expected-real-events', type=int)
+    args = parser.parse_args()
     session = requests.Session()
     base = 'http://localhost:8088'
     response = session.post(base + '/api/v1/security/login', json={
@@ -50,11 +54,18 @@ def main():
     assert len(query('demo', 'repository_clusters', ['repo_name', 'cluster_id'], [])) == 3
     provenance = query('demo', 'publication', ['source_mode', 'loaded_at'], [])
     assert provenance[0]['source_mode'] == 'synthetic_demo'
-    assert query('gold', 'repository_activity_hourly', [], [events])[0]['Events'] is None
+    assert query('gold', 'repository_activity_hourly', [], [events])[0]['Events'] == args.expected_real_events
+    if args.expected_real_events is not None:
+        for table in ('language_activity_hourly', 'contributor_activity_hourly'):
+            assert query('gold', table, [], [events])[0]['Events'] == args.expected_real_events
+        assert query('gold', 'publication', ['source_mode'], [])[0]['source_mode'] == 'hudi_gold'
+    for schema in ('demo', 'gold'):
+        for table, key in (('repository_growth_hourly', 'repo_name'), ('language_growth_hourly', 'language')):
+            query(schema, table, ['hour_utc', key, 'previous_event_count', 'growth_pct'], [])
     for slug in ('il05-demo', 'il05-gold'):
         page = session.get(base + '/superset/dashboard/' + slug + '/', timeout=30)
         page.raise_for_status()
-    print('PASS: authenticated dashboard queries, totals, UTC filtering, provenance, and empty real Gold.')
+    print('PASS: authenticated dashboard queries, totals, UTC filtering, growth views and provenance. Real events: {}.'.format(args.expected_real_events))
 
 
 if __name__ == '__main__':

@@ -1,7 +1,7 @@
 # Part 4 integration contract
 
-Part 4 is independent of the missing Silver/Gold jobs. Coordinate changes here and
-in `docs/data-contract.md`; adapt the exporter if Part 3 chooses a different layout.
+The integrated branch connects all four parts. Coordinate interface changes here
+and in `docs/data-contract.md` before changing jobs or published schemas.
 
 ## Kafka -> durable Bronze
 
@@ -13,7 +13,7 @@ Uncommitted offsets or old raw records do not establish completion.
 ## Commands from Parts 2/3
 
 `orchestration/job_config.json` maps fixed names to scripts and argument lists.
-Initial filenames are proposed adapters; change them when the actual jobs exist.
+The mapped scripts now exist and are used by both complete-pipeline DAGs.
 Jobs run under Spark 3.5.1/Hudi 0.15 with a UTC `--hour YYYY-MM-DD-HH`, must finish,
 and must exit nonzero on errors or unavailable required inputs. Repository metrics
 also produce contributor rankings. Clustering must finish before publication.
@@ -21,7 +21,7 @@ also produce contributor rankings. Clustering must finish before publication.
 ## Hudi Gold -> PostgreSQL
 
 Paths are `/lake/gold/<table>` under `hdfs://namenode:9000`. These are requirements
-for the exporter, not implemented Gold tables in the starter.
+for the exporter and the integrated analytics jobs.
 
 | Table | Columns | Unique key |
 | --- | --- | --- |
@@ -52,8 +52,8 @@ for freshness, rather than assuming that displayed old data is current.
 
 ## Shared deployment
 
-The opt-in `part4` Compose profile adds `part4-init`, `serving-db`, `pipeline-runner`,
-`airflow` and `superset`. Base ingestion works without it. UI ports bind to loopback.
+All platform services start by default, including `part4-init`, `serving-db`,
+`pipeline-runner`, `airflow` and `superset`. UI ports bind to loopback.
 The runner exposes only fixed reviewed jobs, with no host Docker socket.
 Secrets stay in `part4-secrets`; `pipeline-runtime` contains downloads, run manifests,
 exports and logs. Neither volume belongs in Git.

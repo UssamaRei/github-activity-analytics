@@ -1,10 +1,10 @@
 """Shared Spark session, Silver reader and Gold writer for analytics jobs.
 
-Expected from Part 2: `storage/hudi_io.py` with a shared Hudi writer. Until it
-exists, `write_gold(..., fmt="hudi")` uses the Hudi options below, which follow
-the same conventions (record key + precombine + partition). Swap `_write_hudi`
-for Part 2's writer once it is merged; the table keys here stay the contract.
+Uses Part 2's shared Silver reader. Gold has its own table-specific keys and
+publishes complete snapshots through Hudi, including removal of stale groups.
 """
+
+from __future__ import annotations
 
 import csv
 import os
@@ -23,7 +23,8 @@ GOLD_TABLES = {
     "repository_activity_hourly": (["hour_utc", "repo_name"], "event_date"),
     "language_activity_hourly": (["hour_utc", "language"], "event_date"),
     "contributor_rankings_daily": (["event_date", "actor_login"], "event_date"),
-    "repository_clusters": (["period_end", "repo_name"], "period_end"),
+    'contributor_activity_hourly': (['hour_utc', 'actor_login'], 'event_date'),
+    "repository_clusters": (["snapshot_utc", "repo_name"], "period_end"),
 }
 
 
@@ -53,9 +54,14 @@ def load_silver(spark: SparkSession, source: str, silver_path: str = SILVER_PATH
         try:  # Prefer Part 2's shared reader when it is available.
             from storage.hudi_io import read_silver  # type: ignore
 
-            return read_silver(spark, silver_path)
+            result = read_silver(spark, silver_path)
         except ImportError:
-            return spark.read.format("hudi").load(silver_path)
+            result = spark.read.format("hudi").load(silver_path)
+        # The shared Bronze/Silver lake also retains the six explicit demo events.
+        # Real Gold must never count those fictional records as GitHub activity.
+        from analytics.fixtures import load_silver_rows
+        fixture_ids = [row['event_id'] for row in load_silver_rows()]
+        return result.filter(~F.col('event_id').isin(fixture_ids))
     if source == "parquet":
         return spark.read.parquet(silver_path)
     raise ValueError(f"Unknown Silver source: {source}")
@@ -99,7 +105,12 @@ def _write_hudi(df: DataFrame, table: str, path: str, keys: list, partition: str
         "hoodie.datasource.write.precombine.field": "computed_at",
         "hoodie.datasource.write.partitionpath.field": partition,
         "hoodie.datasource.write.keygenerator.class": "org.apache.hudi.keygen.ComplexKeyGenerator",
-        "hoodie.datasource.write.operation": "upsert",
+        # Every job recomputes the full Silver snapshot. Replace the table in one
+        # Hudi commit so changed language groups or removed keys cannot linger.
+        "hoodie.datasource.write.operation": "insert_overwrite_table",
         "hoodie.datasource.write.hive_style_partitioning": "true",
+        'hoodie.metadata.enable': 'false',
+        'hoodie.insert.shuffle.parallelism': '2',
+        'hoodie.upsert.shuffle.parallelism': '2',
     }
     df.write.format("hudi").options(**options).mode("append").save(path)

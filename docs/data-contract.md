@@ -1,4 +1,4 @@
-# Shared data contract - v0.1
+# Shared data contract - integrated v0.3
 
 These conventions describe how components connect. They do not assign work.
 
@@ -58,21 +58,18 @@ These conventions describe how components connect. They do not assign work.
 
 ## HDFS locations
 
-| Location | Current status |
+| HDFS path (under `hdfs://namenode:9000`) | Contents |
 | --- | --- |
-| `hdfs://namenode:9000/lake/bronze/github_events` | Implemented: raw JSONL in Spark `part-*` text files |
-| `hdfs://namenode:9000/checkpoints/github_events_bronze` | Implemented: durable streaming offsets and sink progress |
-| `hdfs://namenode:9000/lake/silver/github_events` | Implemented: Hudi Copy-on-Write table `github_events_silver` |
-| `hdfs://namenode:9000/lake/quarantine/github_events` | Implemented: invalid raw JSON and validation reasons as JSONL |
-| `hdfs://namenode:9000/lake/gold/repository_activity_hourly` | Planned: Hudi repository aggregates |
-| `hdfs://namenode:9000/lake/gold/language_activity_hourly` | Planned: Hudi language aggregates |
-| `hdfs://namenode:9000/lake/gold/repository_clusters` | Planned: KMeans results |
-| `hdfs://namenode:9000/lake/gold/contributor_activity_hourly` | Planned: contributor activity for the dashboard |
-| `hdfs://namenode:9000/lake/silver/github_events` | Planned: Hudi table `github_events_silver` |
-| `hdfs://namenode:9000/lake/gold/repository_activity_hourly` | Job ready (`analytics/`); Hudi run pending Silver |
-| `hdfs://namenode:9000/lake/gold/contributor_rankings_daily` | Job ready (`analytics/`); Hudi run pending Silver |
-| `hdfs://namenode:9000/lake/gold/language_activity_hourly` | Job ready (`analytics/`); Hudi run pending Silver |
-| `hdfs://namenode:9000/lake/gold/repository_clusters` | Job ready (`analytics/`); Hudi run pending Silver |
+| `/lake/bronze/github_events` | Raw JSONL, including replay duplicates |
+| `/checkpoints/github_events_bronze` | Durable stream progress |
+| `/lake/silver/github_events` | Valid Hudi events keyed by event ID |
+| `/lake/quarantine/github_events` | Invalid records and reasons |
+| `/lake/gold/repository_activity_hourly` | Repository activity and growth |
+| `/lake/gold/language_activity_hourly` | Language activity and growth |
+| `/lake/gold/contributor_activity_hourly` | Hourly contributors |
+| `/lake/gold/contributor_rankings_daily` | Additional daily rankings |
+| `/lake/gold/repository_clusters` | KMeans assignments and explanations |
+| `/lake/models/repository-kmeans` | Fitted model |
 
 The streaming query starts at earliest retained Kafka offsets only for its **first**
 run. Subsequent runs resume the checkpoint. Kafka keeps approximately 24 hours of
@@ -128,16 +125,7 @@ columns, and run an event-type count. See `analytics/README.md` for its command.
 - Language is **not a universal field on GH Archive events**. Language analytics
   needs repository metadata enrichment and caching (e.g. GitHub's repository API).
   Store unknown languages explicitly; do not infer a language from a repo name.
-- KMeans should group repositories by documented activity features; it is not a
-  prediction model. Features, scaling, K, and validation remain to be selected.
 
-## Part 4 handoffs and SQL serving
-
-The runner checks committed Kafka offsets before downstream jobs start. Gold
-schemas, executable-job adapters and SQL publication are defined in
-[part4-integration.md](part4-integration.md). PostgreSQL serves checked Gold exports
-to Superset. A separate `demo` schema contains a labeled fixture; real `gold` starts
-empty until the actual Hudi outputs are provided by Parts 2/3.
 - KMeans groups repositories by documented activity features; it is not a
   prediction model. Selected: features `event_count`, `active_contributors`,
   `push_share`, `pr_share`, `issue_share` over a UTC period; `log1p` on the two
@@ -148,7 +136,7 @@ empty until the actual Hudi outputs are provided by Parts 2/3.
 
 Produced by `analytics/` (see [analytics/README.md](../analytics/README.md) for
 commands). All tables live under `hdfs://namenode:9000/lake/gold/<table>`, are Hudi
-upserts keyed as below with `computed_at` as precombine column, and are partitioned
+snapshots keyed as below with `computed_at` as precombine column, and are partitioned
 by the listed date column (Hive-style). Example exports from **test fixtures**:
 `data/samples/gold/`.
 
@@ -157,7 +145,8 @@ by the listed date column (Hive-style). Example exports from **test fixtures**:
 | `repository_activity_hourly` | `hour_utc`, `repo_name` | `event_date` |
 | `contributor_rankings_daily` | `event_date`, `actor_login` | `event_date` |
 | `language_activity_hourly` | `hour_utc`, `language` | `event_date` |
-| `repository_clusters` | `period_end`, `repo_name` | `period_end` |
+| `repository_clusters` | `snapshot_utc`, `repo_name` | `period_end` |
+| `contributor_activity_hourly` | `hour_utc`, `actor_login` | `event_date` |
 
 **repository_activity_hourly:** `hour_utc` (timestamp, UTC hour start), `repo_name`,
 `event_count`, `push_count`, `pr_count`, `issue_count`, `active_contributors` (long),
@@ -169,11 +158,13 @@ nullable), `computed_at` (timestamp).
 a rank), `computed_at`.
 
 **language_activity_hourly:** `hour_utc`, `language` (GitHub primary language or
-`unknown`), `event_count`, `repo_count`, `active_contributors` (distinct actors across
+`unknown`), `event_count`, `repo_count`, `active_repositories` (same repository count), `active_contributors` (distinct actors across
 that language's repositories), `event_date`, `previous_event_count`, `growth_pct`,
 `computed_at`.
 
-**repository_clusters:** `period_start`, `period_end` (dates), `repo_name`,
+**contributor_activity_hourly:** `hour_utc`, `actor_login`, `event_count`, `repo_count`, `event_date`, `computed_at`.
+
+**repository_clusters:** `snapshot_utc` (UTC timestamp), `period_start`, `period_end` (dates), `repo_name`,
 `cluster_id`, `cluster_label` (readable description), `event_count`,
 `active_contributors`, `push_share`, `pr_share`, `issue_share` (raw, unscaled),
 `k`, `silhouette`, `computed_at`.
@@ -187,3 +178,19 @@ hour may not have been ingested) or is 0.
 cached in `data/cache/repo_languages.json` (git-ignored). 404/451 or a null language
 are cached as unknown; temporary failures (rate limit, network, 5xx) are not cached
 and are retried on the next run.
+
+## Integrated snapshot and serving behavior
+
+Silver retains the six fictional sample IDs for replay demonstrations. The real
+analytics reader excludes those known IDs. Fixture modes are only for previews.
+
+Jobs accept `--hour` as a stable UTC source/snapshot identity. Silver scans the
+complete Bronze history; analytics scans the current full Silver snapshot.
+Gold uses Hudi `insert_overwrite_table` so enrichment changes cannot leave stale
+aggregate keys. The SQL exporter reads four complete Gold tables and publishes
+them in one transaction. Daily rankings are additional to the hourly contract.
+
+`demo` contains the labeled SQL fixture; `gold` contains validated real exports.
+Growth views compare the same key/hour one day earlier. Missing/zero baselines
+yield NULL. All services start with `docker compose up --build -d`.
+See [integration details](part4-integration.md).

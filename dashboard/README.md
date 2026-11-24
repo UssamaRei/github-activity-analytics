@@ -4,7 +4,7 @@ Start with `docker compose --profile part4 up --build -d`, then open
 **http://localhost:8088**. Sign in as `student` using the generated password from
 the credentials command in `orchestration/README.md`.
 
-Startup creates the database connection, ten datasets, fourteen charts and two
+Startup creates the database connection, fourteen datasets, eighteen charts and two
 dashboards. Restarting updates the same objects; no manual chart setup is required.
 
 ## Two separate dashboards
@@ -13,12 +13,14 @@ dashboards. Restarting updates the same objects; no manual chart setup is requir
   Reads `demo`. Events, languages and cluster labels are fictional and explicitly
   labeled. The fixture totals 85 events over two hours. The labels are not ML results.
 - **Gold:** http://localhost:8088/superset/dashboard/il05-gold/
-  Reads `gold`, which starts empty. Only a validated Hudi Gold export populates it.
+  Reads `gold`, populated by the integrated Airflow pipeline's validated Hudi export.
   Empty charts do not mean healthy zero activity; no publication row exists until
   the first real snapshot is loaded.
 
 Charts show event totals, hourly activity, repository rankings, languages,
-contributors, groups and publication provenance. A UTC time filter is included;
+contributors, groups, repository/language growth and publication provenance.
+Growth compares the same hour one day earlier; missing/zero baselines yield NULL.
+A UTC time filter is included;
 the provenance table stays unfiltered. Repository groups include their snapshot
 time so historical clustering runs can be distinguished.
 
@@ -33,10 +35,10 @@ database role. The writer publishes all four tables and their provenance in one
 transaction. Failed validation or insertion preserves the previous snapshot and
 publication time.
 
-## Connecting Part 3
+## Part 3 connection
 
 The exact fields and types are defined in `dashboard/contracts.py` and
-[the integration contract](../docs/part4-integration.md). Part 3 must produce:
+[the integration contract](../docs/part4-integration.md). Integrated Part 3 produces:
 
 1. `/lake/gold/repository_activity_hourly`
 2. `/lake/gold/language_activity_hourly`
@@ -48,7 +50,7 @@ writes JSONL and a checksummed manifest, and checks the result. `serving.py`
 validates again before publishing. Synthetic mode is restricted to `demo`.
 
 The SQL publisher replaces a **complete snapshot**, not an hourly delta. Gold jobs
-should upsert historical tables; the exporter reads their full current contents.
+replace complete Hudi snapshots; the exporter reads their full current contents.
 Exports are capped at 100,000 rows per table for the laptop. Empty tables are
 rejected; explicitly revise the policy if a genuinely empty reporting snapshot is needed.
 

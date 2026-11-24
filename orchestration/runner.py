@@ -12,6 +12,7 @@ import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 from ingestion.events import iter_events
 from orchestration.webhdfs import committed_offsets, offsets_reached
@@ -63,10 +64,14 @@ def download_hour(payload):
     limit = payload.get('limit', 1000)
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100000:
         raise ValueError('limit must be between 1 and 100000 events')
-    output = RUNTIME / 'downloads' / (hour + '-' + str(limit) + '.jsonl')
+    full_hour = payload.get('full_hour', False)
+    if not isinstance(full_hour, bool):
+        raise ValueError('full_hour must be boolean')
+    suffix = 'full' if full_hour else str(limit)
+    output = RUNTIME / 'downloads' / (hour + '-' + suffix + '.jsonl')
     if not output.exists():
-        download_sample(hour, output, limit)
-    return {'hour': hour, 'events': sum(1 for _ in iter_events(output)), 'sample_limit': limit}
+        download_sample(hour, output, None if full_hour else limit)
+    return {'hour': hour, 'events': sum(1 for _ in iter_events(output)), 'sample_limit': None if full_hour else limit}
 
 
 def publish_events(payload, sample=False):
@@ -79,24 +84,20 @@ def publish_events(payload, sample=False):
         path = ROOT / 'data/samples/github_events.jsonl'
     else:
         hour = source_hour(payload)
-        path = RUNTIME / 'downloads' / (hour + '-' + str(payload.get('limit', 1000)) + '.jsonl')
-    producer = KafkaProducer(bootstrap_servers=os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka:9092').split(','),
-                             acks='all', retries=5, max_in_flight_requests_per_connection=1)
-    required = {}
-    count = 0
+        suffix = 'full' if payload.get('full_hour', False) else str(payload.get('limit', 1000))
+        path = RUNTIME / 'downloads' / (hour + '-' + suffix + '.jsonl')
+    from ingestion.producer import publish as publish_source
     topic = os.getenv('KAFKA_TOPIC', 'github_events')
-    try:
-        for event, raw in iter_events(path):
-            metadata = producer.send(topic, key=event['repo']['name'].encode(), value=raw).get(timeout=30)
-            partition = str(metadata.partition)
-            required[partition] = max(required.get(partition, 0), metadata.offset + 1)
-            count += 1
-    finally:
-        producer.close(timeout=10)
+    source = publish_source(SimpleNamespace(input=path, limit=None, interval=0, dry_run=False,
+                            hour=None if sample else source_hour(payload), manifest=folder / 'source-publication.json'),
+                            topic, os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka:9092').split(','),
+                            make_producer=KafkaProducer)
+    required = {partition: info['last_offset'] + 1 for partition, info in source['offsets'].items()}
+    count = source['events']
     if not count:
         raise ValueError('No events published')
     result = {'topic': topic, 'events': count, 'required_offsets': required,
-              'source_mode': 'synthetic_sample' if sample else 'gharchive_sample'}
+              'source_mode': 'synthetic_sample' if sample else 'gharchive_full' if payload.get('full_hour', False) else 'gharchive_sample'}
     temporary = folder / 'kafka.json.pending'
     temporary.write_text(json.dumps(result), encoding='utf-8')
     temporary.replace(marker)
@@ -123,6 +124,8 @@ def spark_command(script, arguments):
             '--conf', 'spark.serializer=org.apache.spark.serializer.KryoSerializer',
             '--conf', 'spark.sql.extensions=org.apache.spark.sql.hudi.HoodieSparkSessionExtension',
             '--conf', 'spark.sql.catalog.spark_catalog=org.apache.spark.sql.hudi.catalog.HoodieCatalog',
+            '--conf', 'spark.hadoop.dfs.replication=1',
+            '--py-files', str(ROOT / 'storage/silver_contract.py') + ',' + str(ROOT / 'storage/hudi_io.py'),
             '--packages', os.getenv('HUDI_PACKAGE', 'org.apache.hudi:hudi-spark3.5-bundle_2.12:0.15.0'),
             str(script)] + arguments
 

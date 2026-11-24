@@ -1,5 +1,7 @@
 """Part 3: read and validate the Hudi Silver event table."""
 
+from __future__ import annotations
+
 import os
 
 from pyspark.sql import SparkSession

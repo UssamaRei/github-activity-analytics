@@ -16,6 +16,8 @@ Run on the labeled 12-repository TEST fixture:
     python -m analytics.cluster_repositories --source cluster-fixture --output tmp/gold --format local-csv
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 from datetime import date, datetime, timezone
@@ -76,7 +78,14 @@ def fit_clusters(features: DataFrame, k: int | None = None, max_k: int = 6):
     n = data.count()
     if n < 3:
         raise ValueError(f"Need at least 3 repositories to cluster, got {n}")
-    candidates = [k] if k else list(range(2, min(max_k, n - 1) + 1))
+    distinct = data.select(*['model_' + name for name in FEATURES]).distinct().count()
+    if distinct < 2:
+        raise ValueError('Need at least two distinct repository activity profiles')
+    if k is not None and not 2 <= k <= min(n, distinct):
+        raise ValueError('K must be between 2 and the number of distinct repository profiles')
+    candidates = [k] if k else list(range(2, min(max_k, n - 1, distinct) + 1))
+    if not candidates:
+        raise ValueError('max-k must allow at least two clusters')
     evaluator = ClusteringEvaluator(featuresCol="features", predictionCol="cluster_id")
     scores, models = {}, {}
     for candidate in candidates:
@@ -120,6 +129,7 @@ def main(argv=None):
     from analytics.gold_io import GOLD_PATH, SILVER_PATH, build_spark, load_silver, write_gold
 
     parser = argparse.ArgumentParser(description="Repository KMeans clustering -> Gold repository_clusters")
+    parser.add_argument('--hour', help='UTC snapshot hour; activity features use the complete Silver snapshot')
     parser.add_argument("--source", default="hudi", choices=["hudi", "parquet", "fixture", "cluster-fixture"])
     parser.add_argument("--silver", default=SILVER_PATH)
     parser.add_argument("--output", default=GOLD_PATH)
@@ -146,6 +156,8 @@ def main(argv=None):
             clustered.join(labels, "cluster_id")
             .withColumn("period_start", F.lit(period_start))
             .withColumn("period_end", F.lit(period_end))
+            .withColumn('snapshot_utc', F.lit(datetime.strptime(args.hour, '%Y-%m-%d-%H')
+                                             if args.hour else datetime.combine(period_end, datetime.min.time())))
             .withColumn("k", F.lit(k))
             .withColumn("silhouette", F.lit(scores[k]))
         )

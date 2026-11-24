@@ -1,258 +1,124 @@
 # IL-05 - GitHub Open Source Activity Analytics
 
-**Integration branch: ingestion, Bronze/Silver and Airflow/Superset.**
+GH Archive -> Kafka -> Spark streaming -> HDFS Bronze -> Hudi Silver ->
+Spark SQL / MLlib KMeans -> Hudi Gold -> PostgreSQL -> Superset.
+Airflow coordinates processing. Docker Compose starts the platform.
 
-Université Ibn Zohr - Faculté des Sciences Agadir
-Master Excellence Ingénierie Logicielle - Module Big Data
-Professor: Yassine Oukdach - Academic year: 2026-2027
+## Start
 
-The final project analyzes public GitHub events to show repository, contributor,
-and language activity trends and cluster repositories with MLlib KMeans.
-
-## What this version does
-
-```text
-Six fictional sample events (or a real GH Archive sample)
-    -> Python producer
-    -> Apache Kafka topic github_events
-    -> Spark Structured Streaming
-    -> HDFS Bronze (original JSON records)
-    -> rerunnable Spark validation job
-       -> Hudi Silver (deduplicated current events)
-       -> HDFS quarantine (invalid raw records and reasons)
-```
-
-Implemented: multi-hour GH Archive downloader, checkpointed Kafka publication, HDFS storage,
-checkpointed Spark streaming, Hudi Silver upserts and quarantine, tests and CI.
-
-**Integration in progress:** Hudi Gold, Spark analytical jobs and KMeans,
-and language metadata enrichment. Airflow, Superset and PostgreSQL serving are
-available through the `part4` Compose profile. Real Gold stays empty until the
-upstream jobs are connected.
-Gold directories are reserved paths until analytics runs. This is not the finished
-academic submission. See [roadmap](docs/roadmap.md).
-
-## Part 4: automation and dashboard
-
-```powershell
-docker compose --profile part4 up --build -d
-docker compose --profile part4 exec airflow python /opt/project/orchestration/show_credentials.py
-```
-
-The second command displays generated local credentials for username `student`.
-
-- Airflow: http://localhost:18082
-- Superset demo: http://localhost:8088/superset/dashboard/il05-demo/
-- Superset real Gold: http://localhost:8088/superset/dashboard/il05-gold/
-
-Trigger `il05_sample_ingestion` first. It publishes six events and checks their
-committed Bronze offsets. The full hourly DAG stays paused until the actual
-Silver/analytics jobs exist and reports missing dependencies explicitly.
-The demo has fictional data (85 events); real Gold starts empty. Read the
-[Airflow instructions](orchestration/README.md), [dashboard instructions](dashboard/README.md)
-and [integration contract](docs/part4-integration.md).
-
-The profile adds downloads and memory use. Base ingestion below works alone.
-Set `COMPOSE_PROFILES=part4` in a local `.env` if ordinary `docker compose up`
-should include the full local platform.
-
-## Quick start (PowerShell or a terminal)
-
-Requirements: Docker Desktop running Linux containers, Docker Compose, and an
-internet connection for the initial images, pip package, Spark connector jars,
-and Hudi package.
-Check free disk space first. Initial downloads can require several GB on a clean
-machine. The running demo is configured for roughly 4 GB of container memory limits;
-leave headroom for Docker and Windows. Ports 29092 and 9870 must be available.
-
-From this directory:
+Docker Desktop must run Linux containers. Initial builds require internet access
+and several GB of disk space. Service memory limits total about 8.1 GiB; leave
+headroom for Windows, Docker and batch processing.
 
 ```powershell
 docker compose up --build -d
 docker compose ps -a
-docker compose logs -f spark-bronze
+docker compose exec airflow python /opt/project/orchestration/show_credentials.py
 ```
 
-The first startup may take several minutes. The `producer`, `kafka-init`,
-`hdfs-init`, and `spark-cache-init` containers should finish with **exit code 0**;
-they are one-shot tasks.
-Kafka, NameNode, DataNode, and the streaming consumer keep running.
-The producer publishes the six fictional sample events automatically.
+All services now start by default, including Airflow, PostgreSQL and Superset.
+Wait for health checks. The last command shows the generated password for `student`.
 
-### Monitor Bronze streaming
+- Airflow: http://localhost:18082
+- Real Gold: http://localhost:8088/superset/dashboard/il05-gold/
+- Synthetic demo: http://localhost:8088/superset/dashboard/il05-demo/
+- HDFS: http://localhost:9870
 
-Each query lifecycle/status update and completed micro-batch is logged as a
-timestamped `STREAMING_METRIC` JSON record. The records include input counts,
-rates, trigger execution duration, and Kafka offset ranges. To summarize recent
-batches:
+Credentials and data persist in named volumes. Optional overrides are in
+`.env.example`; the defaults work without a local `.env`.
 
-```sh
-docker compose logs --since 30m --no-color spark-bronze | python3 scripts/streaming_report.py
-```
-
-Inspect live records with `docker compose logs -f --no-color spark-bronze`.
-Check container resource use with
-`docker stats --no-stream spark-bronze kafka namenode datanode` and Docker's
-overall allocation with `docker info`. Monitoring is log-only; it does not alter
-the Bronze checkpoint or the existing 5-second trigger.
-
-Build Silver and verify that replayed IDs do not increase its current row count:
+## Run the complete pipeline
 
 ```powershell
-docker compose run --rm spark-silver
-docker compose run --rm --entrypoint /opt/spark/bin/spark-submit spark-silver --master 'local[2]' --driver-memory 768m --conf spark.jars.ivy=/tmp/ivy --conf spark.jars.ivySettings=/opt/project/storage/ivysettings.xml --conf spark.driver.host=spark-silver --py-files /opt/project/storage/silver_contract.py,/opt/project/storage/hudi_io.py --packages org.apache.hudi:hudi-spark3.5-bundle_2.12:0.15.0 /opt/project/analytics/read_silver.py
-docker compose exec namenode hdfs dfs -ls -R /lake/silver/github_events
+docker compose exec -T airflow python -m orchestration.verify_pipeline --hour 2025-01-01-15 --limit 100
 ```
 
-The Part 3 reader checks the Silver schema, rejects null or duplicate event IDs,
-and reports the current row count and event-type counts. To verify replay safety,
-replay the six sample records, rerun `spark-silver`, and run the reader again; the
-fixture produces six current event IDs regardless of Bronze replay copies. See
-[analytics/README.md](analytics/README.md) for the reader interface and schema.
+This triggers `il05_pipeline_manual` through the actual scheduler and waits for
+all eleven tasks: download, Kafka publication, committed Bronze verification,
+Silver, quality checks, analytics, KMeans, Hudi export and SQL publication.
+View the output in the real Gold dashboard.
 
-### Part 2 manual verification sequence
+In Airflow, the same DAG accepts `source_hour`, `event_limit` and `full_hour`.
+Sample mode is the default; `full_hour=true` requests an entire archive. A small
+sample run does not establish full-hour capacity. Growth compares the same hour
+one day earlier: ingest matching hours such as `2025-01-01-15` and `2025-01-02-15`.
+Missing or zero baselines display unavailable growth, not artificial zero growth.
 
-```sh
-docker compose up --build -d
-# hdfs-init runs automatically; this confirms the directories are present.
-docker compose exec namenode hdfs dfs -ls /lake/bronze /lake/silver /lake/quarantine
-python3 scripts/verify_bronze.py
-docker compose exec namenode hdfs dfs -cat '/lake/bronze/github_events/part-*'
-docker compose run --rm spark-silver
-docker compose exec namenode hdfs dfs -ls -R /lake/silver/github_events
-# Run the Spark/Hudi reader command shown above.
-docker compose run --rm producer
-docker compose run --rm spark-silver
-# Run the Spark/Hudi reader again; current Silver should still report 6 sample IDs.
-docker compose restart spark-bronze
-docker compose run --rm producer
-python3 scripts/verify_bronze.py
-```
+`il05_hourly_pipeline` has the same processing steps and an hourly UTC schedule.
+It starts paused to avoid unexpected downloads; unpause it for automatic ingestion.
+All tasks and retries retain the same source hour.
 
-The final restart/replay check confirms the stream resumes from its HDFS
-checkpoint and consumes new offsets without replaying prior offsets. Bronze
-contains additional raw rows after the explicit producer runs; Silver remains
-one current row per event ID.
+`il05_sample_ingestion` publishes six fictional fixture events.
+`il05_refresh_demo_dashboard` refreshes only the separate 85-event SQL demo.
+Known fictional sample IDs remain inspectable in Silver and are excluded from
+real analytics. Fixture languages and cluster labels are not real results.
 
-With Python 3.11+ installed on the host, verify the result:
+## Processing and replay
 
-```powershell
-python scripts/verify_bronze.py
-```
+Silver validates and quarantines input, then upserts by event ID. Kafka replay can
+add raw Bronze rows, but must not add unique Silver events or inflate Gold counts.
+Gold jobs recompute the full current Silver snapshot. Hudi snapshot replacement
+also removes obsolete aggregation keys after language enrichment changes.
+Daily contributor rankings supplement the hourly dashboard table.
 
-Expected: `PASS: 6 expected raw records found unchanged in Bronze (6 unique IDs).`
-The script waits up to 180 seconds. It checks actual raw records in HDFS, not just
-whether containers started. To inspect manually:
+Language metadata is cached in the runtime volume; failed/missing lookups remain
+`unknown`. KMeans saves settings and its fitted model. It requires at least three
+repositories with more than one distinct activity profile.
 
-```powershell
-docker compose exec namenode hdfs dfs -ls /lake/bronze/github_events
-docker compose exec namenode hdfs dfs -cat '/lake/bronze/github_events/part-*'
-```
+The default language job attempts at most 30 API requests per run. For better
+coverage, provide `GITHUB_TOKEN` in an uncommitted local `.env` and raise
+`--max-requests` in `orchestration/job_config.json`. Unknown categories remain
+in activity totals but do not count as named growing languages.
 
-HDFS NameNode interface: http://localhost:9870 (file browser and storage information;
-this is an infrastructure interface, not the future analytics dashboard).
+Superset uses a read-only PostgreSQL copy of four validated Hudi Gold tables.
+Publication is one transaction; failure preserves the previous published snapshot.
+The dashboard shows its source and publication time.
 
-## Replay the sample
-
-```powershell
-docker compose run --rm producer
-python scripts/verify_bronze.py
-```
-
-A replay intentionally creates more raw records with the same event IDs in Bronze.
-Re-run `docker compose run --rm spark-silver` to upsert the repeated IDs without
-increasing the number of current Silver records. Do not present duplicate raw
-events as additional unique GitHub activity.
-
-## Download and publish selected GH Archive hours
-
-Use UTC hours in `YYYY-MM-DD-HH` format. This downloads up to 100 events
-per hour, then publishes and verifies the first hour.
-
-```powershell
-docker compose run --rm --no-deps producer python -m ingestion.download --hour 2025-01-01-15 --hour 2025-01-01-16 --limit 100 --output-dir data/downloads
-docker compose run --rm producer python -m ingestion.producer --input data/downloads/2025-01-01-15-sample-100.jsonl --hour 2025-01-01-15 --manifest data/downloads/2025-01-01-15-sample-100.publish.json
-python scripts/verify_bronze.py --expected data/downloads/2025-01-01-15-sample-100.jsonl
-```
-
-Repeat the publish command with the second hour and its corresponding paths.
-For a whole archive, use `--full-hour` instead of the download limit, replace
-`sample-100` with `full` in both publication paths, and leave off the producer
-limit. With `--output-dir`, rerunning the same download command reuses files
-already completed for that hour and volume. A single hour can still use
-`--output PATH` for a custom filename.
-
-The publish manifest records progress for the selected hour. If publication
-fails, rerun the same command to replay from the first event. A successful
-manifest lets the retry skip the completed publication. The [data contract](docs/data-contract.md)
-describes the scheduler interface, Kafka offsets, and replay behavior. See the
-[ingestion README](ingestion/README.md) for verification results.
-
-## Fast local checks (no Docker services or pip packages required)
+## Checks
 
 ```powershell
 python -m unittest discover -s tests -v
-python -m ingestion.producer --input data/samples/github_events.jsonl --dry-run
 docker compose config --quiet
+docker compose exec -T pipeline-runner python3 -m orchestration.verify_serving
+docker compose exec -T superset python /opt/project/dashboard/verify_superset.py --expected-real-events 100
 ```
 
-Expected dry-run counts: 6 events; 3 pushes, 2 issue events, 1 pull request event.
-GitHub Actions is configured to run these lightweight checks on pushes and pull requests.
-CI does not run the container integration test.
-Local integration results are recorded in [validation](docs/validation.md).
+Adjust the expected total to all unique real events currently in the lake.
+Host tests skip Spark tests if PySpark is absent. Run them in Docker:
 
-## Stop and resume
+```powershell
+docker compose exec -T pipeline-runner env 'PYTHONPATH=/opt/spark/python:/opt/spark/python/lib/py4j-0.10.9.7-src.zip:/opt/project' 'PYSPARK_SUBMIT_ARGS=--master local[2] --driver-memory 768m pyspark-shell' python3 -m unittest discover -s tests -p test_analytics.py -v
+```
+
+Do not run another Spark batch in the runner while a pipeline task is active.
+Observed results and limits are in [validation](docs/validation.md).
+
+## Files and contracts
+
+- [ingestion](ingestion/README.md): multi-hour downloads and Kafka publication.
+- [storage](storage/README.md): streaming, Silver, quarantine and quality checks.
+- [analytics](analytics/README.md): SQL metrics, growth and KMeans.
+- [orchestration](orchestration/README.md): DAGs and pipeline verification.
+- [dashboard](dashboard/README.md): SQL publication and reproducible charts.
+- [Data contract](docs/data-contract.md) and [integration details](docs/part4-integration.md).
+
+Services connect using Docker names (`kafka`, `namenode`, `serving-db`).
+`localhost` inside a container refers to that container.
+
+## Stop, resume and troubleshoot
 
 ```powershell
 docker compose down
 docker compose up -d
+docker compose logs --tail 100 airflow pipeline-runner spark-bronze superset
 ```
 
-Named volumes preserve Kafka, HDFS, and Spark dependency downloads. On subsequent
-startup, the sample producer can run again, so raw replay duplicates are normal.
-The Spark job resumes its HDFS checkpoint. Keep output and checkpoints consistent.
-For a deliberate **complete reset of this project's data only**, use
-`docker compose down --volumes`. That command deletes this Compose project's
-Kafka records, HDFS files, checkpoints, and cached connector jars.
+Ordinary shutdown preserves volumes and credentials. Keep checkpoints with their
+sinks. Initializers and the sample producer finish with exit 0; other services
+stay running. Exit 137 usually indicates memory pressure. Spark logs are in
+`pipeline-runtime/runs/<run-hash>/`. Streaming metrics are described in storage/.
 
-## Structure and shared conventions
+This is a local academic deployment with loopback-only host ports, one Kafka
+broker and one HDFS DataNode. It is not configured for public hosting.
 
-- `ingestion/`: downloader, JSONL reader, and Kafka producer.
-- `storage/`: Bronze streaming and the Silver Hudi upsert/quarantine job.
-- `analytics/`: interfaces for the upcoming Gold jobs.
-- `orchestration/`: Airflow workflows, private job runner and integration checks.
-- `dashboard/`: Gold export, transactional PostgreSQL publication and Superset dashboards.
-- `docs/`: [architecture](docs/architecture.md), [data contract](docs/data-contract.md), [roadmap](docs/roadmap.md).
-- `tests/`: ingestion, download, publication-contract and pipeline-handoff checks.
-
-The Compose network uses service names such as `kafka` and `namenode`.
-`localhost` inside a container points to that container, not another service.
-Optional port/image overrides are documented in `.env.example`; copy it to `.env`
-only if needed. The default setup works without an `.env` file.
-
-## Troubleshooting
-
-- `docker compose logs kafka` / `namenode` / `datanode` / `spark-bronze` show the failing layer.
-- A first Spark startup downloads the matching Kafka connector and its dependencies.
-  If Maven is unreachable, fix connectivity and run `docker compose restart spark-bronze`.
-- If a service exits with code 137, check Docker/host memory and close unnecessary apps.
-- If the NameNode starts but writes fail, check the DataNode and free disk space.
-- If ports are occupied, set `KAFKA_PORT` or `HDFS_UI_PORT` in `.env`.
-- This is an isolated local academic demo: single broker, one DataNode, no service
-  authentication, no encryption, and a legacy Hadoop image. Host ports bind to
-  loopback. It is not configured for public deployment.
-
-## GitHub handoff
-
-Repository: [UssamaRei/github-activity-analytics](https://github.com/UssamaRei/github-activity-analytics).
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before making changes. Each member should
-clone the repository and use their own Git account. Collaborator invitations and
-each member's responsibilities are agreed within the group.
-
-```powershell
-git clone https://github.com/UssamaRei/github-activity-analytics.git
-cd github-activity-analytics
-docker compose up --build -d
-```
-
-Technical references are collected in [docs/architecture.md](docs/architecture.md).
+Repository: https://github.com/UssamaRei/github-activity-analytics

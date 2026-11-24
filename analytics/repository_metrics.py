@@ -10,6 +10,8 @@ Run on the labeled six-event TEST fixture (no HDFS needed):
     python -m analytics.repository_metrics --source fixture --output tmp/gold
 """
 
+from __future__ import annotations
+
 import argparse
 
 from pyspark.sql import DataFrame, Window
@@ -63,6 +65,14 @@ def contributor_rankings(silver: DataFrame) -> DataFrame:
     return daily.withColumn("rank", F.rank().over(window))
 
 
+def contributor_activity_hourly(silver: DataFrame) -> DataFrame:
+    return (deduplicate(silver)
+            .withColumn('hour_utc', F.date_trunc('hour', F.col('created_at')))
+            .groupBy('hour_utc', 'actor_login')
+            .agg(F.count('*').alias('event_count'), F.countDistinct('repo_name').alias('repo_count'))
+            .withColumn('event_date', F.to_date('hour_utc')))
+
+
 def add_growth(hourly: DataFrame, keys=("repo_name",)) -> DataFrame:
     """Add previous_event_count and growth_pct, comparing each row with the SAME
     UTC hour one day earlier for the same key (matching periods, so a quiet
@@ -90,6 +100,7 @@ def add_growth(hourly: DataFrame, keys=("repo_name",)) -> DataFrame:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Silver -> Gold repository metrics")
+    parser.add_argument('--hour', help='UTC source-hour identity; recompute the complete Silver snapshot')
     parser.add_argument("--source", default="hudi", choices=["hudi", "parquet", "fixture", "cluster-fixture"])
     parser.add_argument("--silver", default=SILVER_PATH)
     parser.add_argument("--output", default=GOLD_PATH, help="Gold base directory")
@@ -101,7 +112,8 @@ def main(argv=None):
         silver = load_silver(spark, args.source, args.silver)
         hourly = add_growth(repository_activity_hourly(silver))
         rankings = contributor_rankings(silver)
-        for table, df in (("repository_activity_hourly", hourly), ("contributor_rankings_daily", rankings)):
+        for table, df in (("repository_activity_hourly", hourly), ("contributor_rankings_daily", rankings),
+                          ('contributor_activity_hourly', contributor_activity_hourly(silver))):
             print(f"wrote {table}: {df.count()} rows -> {write_gold(df, table, args.output, args.format)}")
     finally:
         spark.stop()

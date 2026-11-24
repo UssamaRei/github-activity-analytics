@@ -1,6 +1,7 @@
 # Working together
 
-Use one shared repository. Responsibilities remain unassigned until the group agrees.
+Use one shared repository. Each member develops their agreed part on a separate
+branch and follows the shared data and executable-job contracts.
 
 1. Pull the latest `main` and create a short-lived branch, e.g. `feature/silver-hudi`.
 2. Keep changes focused and update the relevant README and data contract.

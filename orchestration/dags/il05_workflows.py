@@ -1,4 +1,4 @@
-"""Part 4 DAGs. Missing Parts 2/3 fail preflight; they never turn into fake successes."""
+"""Integrated manual/hourly processing and separate synthetic demonstrations."""
 
 from datetime import datetime, timedelta, timezone
 
@@ -21,8 +21,9 @@ def context_payload():
         anchor = context.get('logical_date') or context['dag_run'].run_after
         stamp = anchor.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
     return {'run_id': context['dag'].dag_id + ':' + context['run_id'],
-            'hour': stamp.astimezone(timezone.utc).strftime('%Y-%m-%d-%H'),
-            'limit': context['params'].get('event_limit', 1000)}
+            'hour': context['params'].get('source_hour') or stamp.astimezone(timezone.utc).strftime('%Y-%m-%d-%H'),
+            'limit': context['params'].get('event_limit', 1000),
+            'full_hour': context['params'].get('full_hour', False)}
 
 
 @task
@@ -44,11 +45,7 @@ with DAG(dag_id='il05_refresh_demo_dashboard', schedule=None, start_date=datetim
     job.override(task_id='validate_and_publish_synthetic_snapshot')('refresh_demo')
 
 
-with DAG(dag_id='il05_hourly_pipeline', schedule=CronDataIntervalTimetable('0 * * * *', timezone='UTC'), start_date=datetime(2025, 1, 1, tzinfo=timezone.utc),
-         catchup=False, max_active_runs=1, is_paused_upon_creation=True, default_args=DEFAULTS,
-         params={'event_limit': Param(1000, type='integer', minimum=1, maximum=100000)},
-         tags=['il05', 'integration-required'],
-         description='UTC-hour pipeline. Keep paused until Parts 2/3 provide the documented jobs.'):
+def build_pipeline():
     steps = [
         ('check_parts_2_and_3', 'preflight'),
         ('download_utc_hour_sample', 'download_hour'),
@@ -68,3 +65,22 @@ with DAG(dag_id='il05_hourly_pipeline', schedule=CronDataIntervalTimetable('0 * 
         if previous is not None:
             previous >> current
         previous = current
+
+
+def pipeline_params():
+    return {'event_limit': Param(1000, type='integer', minimum=1, maximum=100000),
+            'source_hour': Param(None, type=['null', 'string'], pattern=r'^\d{4}-\d{2}-\d{2}-\d{2}$'),
+            'full_hour': Param(False, type='boolean')}
+
+
+with DAG(dag_id='il05_hourly_pipeline', schedule=CronDataIntervalTimetable('0 * * * *', timezone='UTC'),
+         start_date=datetime(2025, 1, 1, tzinfo=timezone.utc), catchup=False, max_active_runs=1,
+         is_paused_upon_creation=True, default_args=DEFAULTS, params=pipeline_params(), tags=['il05', 'real-data'],
+         description='Completed UTC-hour pipeline; unpause when automatic ingestion is wanted.'):
+    build_pipeline()
+
+
+with DAG(dag_id='il05_pipeline_manual', schedule=None, start_date=datetime(2025, 1, 1, tzinfo=timezone.utc),
+         catchup=False, max_active_runs=1, default_args=DEFAULTS, params=pipeline_params(), tags=['il05', 'real-data'],
+         description='The same eleven pipeline steps, with a chosen historical source_hour and event_limit.'):
+    build_pipeline()

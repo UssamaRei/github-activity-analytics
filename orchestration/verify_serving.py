@@ -18,7 +18,7 @@ def main():
             cursor.execute('SELECT SUM(event_count) FROM demo.repository_activity_hourly')
             assert cursor.fetchone()[0] == 85
             cursor.execute('SELECT COUNT(*) FROM gold.repository_activity_hourly')
-            assert cursor.fetchone()[0] == 0
+            gold_count_before = cursor.fetchone()[0]
             cursor.execute('SELECT source_snapshot, loaded_at FROM demo.publication')
             publication_before = cursor.fetchone()
         bad = copy.deepcopy(tables)
@@ -63,6 +63,19 @@ def main():
             assert cursor.fetchone()[0] == 0
             cursor.execute('SELECT source_snapshot, loaded_at FROM demo.publication')
             assert cursor.fetchone() == publication_before
+            cursor.execute('SELECT COUNT(*) FROM gold.repository_activity_hourly')
+            assert cursor.fetchone()[0] == gold_count_before
+        # Verify growth with a disposable baseline inside an uncommitted transaction.
+        with connection.cursor() as cursor:
+            cursor.execute("INSERT INTO demo.repository_activity_hourly "
+                "(hour_utc,repo_name,event_count,push_count,pr_count,issue_count,active_contributors) "
+                "VALUES ('2024-12-31T10:00:00Z','demo-org/alpha',5,3,1,1,2)")
+            cursor.execute("SELECT current.event_count, previous_event_count, growth_pct "
+                           "FROM demo.repository_growth_hourly AS current "
+                           "WHERE hour_utc='2025-01-01T10:00:00Z' AND repo_name='demo-org/alpha'")
+            current, previous, growth = cursor.fetchone()
+            assert previous == 5 and growth == (current - previous) / previous * 100
+        connection.rollback()
         password = Path('/run/il05-secrets/reader_password').read_text().strip()
         reader = psycopg2.connect(host='serving-db', dbname='analytics', user='dashboard_reader', password=password)
         try:

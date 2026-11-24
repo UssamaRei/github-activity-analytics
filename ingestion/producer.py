@@ -1,5 +1,7 @@
 """Publish source JSONL records unchanged, keyed by repository name."""
 
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json
@@ -52,7 +54,10 @@ def publish(args, topic, brokers, make_producer=None, kafka_errors=()):
             # Preserve an existing record until its input and destination have been checked.
             owns_manifest = previous is None
             with args.input.open("rb") as stream:
-                manifest["input_sha256"] = hashlib.file_digest(stream, "sha256").hexdigest()
+                digest = hashlib.sha256()
+                for block in iter(lambda: stream.read(1024 * 1024), b''):
+                    digest.update(block)
+                manifest["input_sha256"] = digest.hexdigest()
             if previous is not None:
                 identity = ("source_hour_utc", "limit", "brokers", "topic")
                 previous_digest = previous["input_sha256"]

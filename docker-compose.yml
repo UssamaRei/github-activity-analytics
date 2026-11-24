@@ -201,7 +201,6 @@ services:
     mem_limit: 192m
 
   part4-init:
-    profiles: [part4]
     image: python:3.11-slim-bookworm
     entrypoint: [python, /opt/il05/init_secrets.py]
     volumes:
@@ -211,7 +210,6 @@ services:
     mem_limit: 128m
 
   serving-db:
-    profiles: [part4]
     image: postgres:16
     environment:
       POSTGRES_USER: il05
@@ -233,7 +231,6 @@ services:
     mem_limit: 384m
 
   pipeline-runner:
-    profiles: [part4]
     image: il05-runner:0.2.0
     build:
       context: .
@@ -247,6 +244,7 @@ services:
       WEBHDFS_URL: http://namenode:9870
       HADOOP_USER_NAME: github
       HUDI_PACKAGE: org.apache.hudi:hudi-spark3.5-bundle_2.12:0.15.0
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     depends_on:
       serving-db:
         condition: service_healthy
@@ -263,6 +261,8 @@ services:
       - ./storage:/opt/project/storage:ro
       - ./analytics:/opt/project/analytics:ro
       - ./data/samples:/opt/project/data/samples:ro
+      - ./tests:/opt/project/tests:ro
+      - ./scripts:/opt/project/scripts:ro
       - pipeline-runtime:/opt/project/data/runtime
       - spark-ivy:/tmp/ivy
       - part4-secrets:/run/il05-secrets:ro
@@ -274,7 +274,6 @@ services:
     mem_limit: 1536m
 
   airflow:
-    profiles: [part4]
     image: apache/airflow:3.4.0-python3.11
     user: "50000:0"
     command: [bash, /opt/project/orchestration/start_airflow.sh]
@@ -313,7 +312,6 @@ services:
     mem_limit: 2048m
 
   superset:
-    profiles: [part4]
     image: il05-superset:0.2.0
     build:
       context: .

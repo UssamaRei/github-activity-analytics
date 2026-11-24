@@ -26,7 +26,18 @@ a partial batch: Bronze is at least once; Silver must deduplicate event IDs.
 `il05_refresh_demo_dashboard` refreshes only the synthetic SQL schema. It never
 publishes synthetic rows into real `gold`.
 
-## Hourly integration DAG
+## Complete real-data pipeline
+
+All services start with `docker compose up --build -d`; the old explicit
+`--profile part4` commands remain compatible. Run the eleven steps manually:
+
+```powershell
+docker compose exec -T airflow python -m orchestration.verify_pipeline --hour 2025-01-01-15 --limit 100
+```
+
+`il05_pipeline_manual` accepts `source_hour`, `event_limit` and `full_hour` and
+uses exactly the same task chain as the hourly DAG. It avoids starting automatic
+hourly downloads while testing a selected historical hour.
 
 `il05_hourly_pipeline` is **paused by default**:
 
@@ -36,11 +47,11 @@ check integrations -> download UTC hour -> Kafka -> committed Bronze
     -> language Gold -> KMeans -> validated Gold export -> SQL publication
 ```
 
-It currently fails preflight with a specific list of missing Parts 2/3 scripts.
-It does not mark placeholders successful or treat demo charts as real results.
-Adapt `job_config.json` when teammates supply their commands:
+Preflight checks the integrated scripts. Jobs fail with nonzero exit codes;
+placeholders and demo charts cannot substitute for real pipeline results.
+`job_config.json` maps the actual commands:
 
-| Job | Proposed script | Initial argument |
+| Job | Script | Argument |
 | --- | --- | --- |
 | Silver | `storage/silver_job.py` | `--hour YYYY-MM-DD-HH` |
 | Silver quality | `storage/check_silver.py` | same |
@@ -48,16 +59,18 @@ Adapt `job_config.json` when teammates supply their commands:
 | Language metrics | `analytics/language_metrics.py` | same |
 | Repository clustering | `analytics/cluster_repositories.py` | same |
 
-These scripts do not exist yet. They must exit nonzero on failure. The runner uses
+These scripts are integrated and return nonzero on failure. The runner uses
 argument lists, not shell strings, and needs no Docker socket. It supplies Spark
 3.5.1 and the matching Hudi bundle; teammates can import their shared Hudi utilities.
 
-After integration, unpause the hourly DAG. Its UTC interval is the preceding
+Unpause the hourly DAG when automatic ingestion is wanted. Its UTC interval is the preceding
 completed hour, catchup is disabled, and only one run is active at a time. The
 manual-run fallback uses the completed UTC hour before the run's timestamp; all
 tasks and retries keep that same hour. The current
-downloader is still a **bounded sample**, default 1,000 events, exposed as
-`event_limit`. Part 1 must extend it before claiming complete hourly archives.
+default is a **bounded sample**, 1,000 events, exposed as `event_limit`.
+Set `full_hour=true` to use Part 1's complete-archive downloader. Full-hour
+throughput needs a separate capacity test. Silver and Gold scan current history;
+Gold replaces full Hudi snapshots so outdated aggregate keys cannot linger.
 KMeans initially retrains in each integrated run; split its schedule later if the
 model lifetime or volume requires it.
 
@@ -88,20 +101,19 @@ Wait until Airflow, Superset and the runner show `healthy` in Compose, then run:
 ```powershell
 docker compose --profile part4 exec -T airflow python -m orchestration.verify_airflow
 docker compose --profile part4 exec -T pipeline-runner python3 -m orchestration.verify_serving
-docker compose --profile part4 exec -T superset python /opt/project/dashboard/verify_superset.py
+docker compose --profile part4 exec -T superset python /opt/project/dashboard/verify_superset.py --expected-real-events 100
 ```
 
 The first command triggers two actual DAG runs. It publishes six additional raw
 sample events, refreshes the synthetic SQL snapshot, restores the sample/demo
 DAGs' previous pause settings, and confirms the hourly DAG is paused. Retries of
 the same publication reuse its manifest; separate verification runs deliberately
-replay the fixture. It also reports the missing upstream scripts through preflight.
+replay the fixture. It also checks the now-integrated scripts through preflight.
 
 The SQL check injects a failure midway through publication and checks rollback,
 provenance preservation and the read-only account. The Superset check authenticates
 without displaying the password and verifies totals, rankings and UTC filtering.
-These checks target the starter state where real Gold is empty; revise that
-expectation when Parts 2/3 have supplied real results.
+Adjust the expected real-event total to all unique real events in your lake.
 
 For startup problems, run:
 

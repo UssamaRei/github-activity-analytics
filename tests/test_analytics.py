@@ -124,6 +124,14 @@ class SparkAnalyticsTests(unittest.TestCase):
         self.assertEqual({r.rank for r in rows.values()}, {1})
         self.assertEqual(rows["demo-alice"].repo_count, 2)
 
+    def test_hourly_contributor_contract_and_reconciliation(self):
+        rows = self.metrics.contributor_activity_hourly(self.silver).collect()
+        self.assertEqual(sum(row.event_count for row in rows), 6)
+        self.assertEqual({row.actor_login for row in rows}, {'demo-alice', 'demo-bob', 'demo-charlie'})
+        self.assertEqual({str(row.hour_utc) for row in rows}, {'2025-01-01 15:00:00'})
+        self.assertEqual({row.actor_login: row.repo_count for row in rows},
+                         {'demo-alice': 2, 'demo-bob': 1, 'demo-charlie': 2})
+
     # --- growth -----------------------------------------------------------
     def test_growth_compares_same_hour_previous_day(self):
         hourly = self.spark.createDataFrame(
@@ -161,7 +169,7 @@ class SparkAnalyticsTests(unittest.TestCase):
         self.assertEqual(k, 3, scores)
         by_profile = {}
         for row in clustered.collect():
-            profile = row.repo_name.split("/")[0].removeprefix("fixture-")
+            profile = row.repo_name.split("/")[0].replace("fixture-", "", 1)
             by_profile.setdefault(profile, set()).add(row.cluster_id)
         self.assertTrue(all(len(ids) == 1 for ids in by_profile.values()), by_profile)
         self.assertEqual(len({next(iter(ids)) for ids in by_profile.values()}), 3)

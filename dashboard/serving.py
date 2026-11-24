@@ -54,6 +54,22 @@ def ensure_tables(connection, schema):
             cursor.execute(sql.SQL('CREATE TABLE IF NOT EXISTS {}.{} ({})').format(
                 sql.Identifier(schema), sql.Identifier(name), sql.SQL(',').join(fields)))
         cursor.execute(sql.SQL('CREATE TABLE IF NOT EXISTS {}.publication (source_mode TEXT NOT NULL, source_snapshot TEXT NOT NULL, loaded_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, row_count BIGINT NOT NULL)').format(sql.Identifier(schema)))
+        # Read-only views expose growth without changing the four-table export
+        # contract. A missing/zero comparison hour produces NULL, never fake 0%.
+        for kind, key in (('repository', 'repo_name'), ('language', 'language')):
+            view = kind + '_growth_hourly'
+            source = kind + '_activity_hourly'
+            cursor.execute(sql.SQL('''CREATE OR REPLACE VIEW {schema}.{view} AS
+                SELECT current.hour_utc, current.{key}, current.event_count,
+                       previous.event_count AS previous_event_count,
+                       ROUND(100.0 * (current.event_count - previous.event_count)
+                         / NULLIF(previous.event_count, 0), 2)::double precision AS growth_pct
+                FROM {schema}.{source} AS current
+                LEFT JOIN {schema}.{source} AS previous
+                  ON current.{key} = previous.{key}
+                 AND previous.hour_utc = current.hour_utc - INTERVAL '1 day'
+                ''').format(schema=sql.Identifier(schema), view=sql.Identifier(view),
+                            source=sql.Identifier(source), key=sql.Identifier(key)))
 
 
 def publish(tables, schema, snapshot, source_mode):

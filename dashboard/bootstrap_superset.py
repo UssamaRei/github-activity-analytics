@@ -17,10 +17,9 @@ def chart_definitions():
         ('Hourly activity (UTC)', 'repository_activity_hourly', 'echarts_timeseries_line',
          {'x_axis': 'hour_utc', 'time_grain_sqla': 'PT1H', 'metrics': [events], 'groupby': [],
           'rich_tooltip': True, 'show_legend': False, 'x_axis_title': 'UTC hour', 'y_axis_title': 'Events'}),
-        ('Repository ranking', 'repository_activity_hourly', 'echarts_timeseries_bar',
-         {'x_axis': 'repo_name', 'metrics': [events], 'groupby': [], 'row_limit': 10,
-          'orientation': 'horizontal', 'show_legend': False, 'y_axis_title': 'Events',
-          'order_desc': True, 'x_axis_sort': 'Events', 'x_axis_sort_asc': True}),
+        ('Repository ranking', 'repository_activity_hourly', 'table',
+         {'query_mode': 'aggregate', 'groupby': ['repo_name'], 'metrics': [events],
+          'order_desc': True, 'row_limit': 10, 'page_length': 10, 'include_time': False}),
         ('Activity by language', 'language_activity_hourly', 'pie',
          {'groupby': ['language'], 'metric': events, 'row_limit': 20,
           'show_labels': True, 'label_type': 'key_percent', 'show_legend': True}),
@@ -30,6 +29,15 @@ def chart_definitions():
         ('Repository groups', 'repository_clusters', 'table',
          {'query_mode': 'raw', 'all_columns': ['snapshot_utc', 'repo_name', 'cluster_id', 'event_count', 'active_contributors'],
           'row_limit': 100, 'page_length': 10}),
+        ('Repository growth vs yesterday', 'repository_growth_hourly', 'table',
+         {'query_mode': 'raw', 'all_columns': ['hour_utc', 'repo_name', 'event_count', 'previous_event_count', 'growth_pct'],
+          'row_limit': 20, 'page_length': 10, 'order_by_cols': ['["growth_pct", false]'],
+          'adhoc_filters': [{'clause': 'WHERE', 'expressionType': 'SQL', 'sqlExpression': 'previous_event_count > 0'}]}),
+        ('Language growth vs yesterday', 'language_growth_hourly', 'table',
+         {'query_mode': 'raw', 'all_columns': ['hour_utc', 'language', 'event_count', 'previous_event_count', 'growth_pct'],
+          'row_limit': 20, 'page_length': 10, 'order_by_cols': ['["growth_pct", false]'],
+          'adhoc_filters': [{'clause': 'WHERE', 'expressionType': 'SQL',
+                            'sqlExpression': "previous_event_count > 0 AND language <> 'unknown'"}]}),
         ('Publication status', 'publication', 'table',
          {'query_mode': 'raw', 'all_columns': ['source_mode', 'source_snapshot', 'loaded_at', 'row_count'],
           'row_limit': 1, 'page_length': 1}),
@@ -40,7 +48,9 @@ def layout(charts, schema):
     notice = ('**DEMO — SYNTHETIC DATA.** These events, languages and cluster labels are fictional. '
               'They demonstrate the dashboard and are not GitHub or trained KMeans results.' if schema == 'demo' else
               '**GOLD RESULTS.** Only validated exports of the Hudi Gold tables appear here. '
-              'Empty charts mean no snapshot has been published. Check Publication status for the source and load time.')
+              'Coverage is limited to ingested samples/hours. '
+              'Growth compares the same UTC hour yesterday; a missing baseline is unavailable. '
+              'Check Publication status for the source and load time.')
     result = {
         'DASHBOARD_VERSION_KEY': 'v2',
         'ROOT_ID': {'id': 'ROOT_ID', 'type': 'ROOT', 'children': ['GRID_ID']},
@@ -48,18 +58,19 @@ def layout(charts, schema):
         'NOTICE': {'id': 'NOTICE', 'type': 'MARKDOWN', 'parents': ['ROOT_ID', 'GRID_ID'],
                    'meta': {'code': notice, 'width': 12, 'height': 10}},
     }
-    for index in range(0, len(charts), 2):
+    rows = [charts[0:2], charts[2:4], charts[4:6]] + [[chart] for chart in charts[6:]]
+    for index, row_charts in enumerate(rows):
         row_id = 'ROW-' + str(index)
         result['GRID_ID']['children'].append(row_id)
         result[row_id] = {'id': row_id, 'type': 'ROW', 'parents': ['ROOT_ID', 'GRID_ID'],
                           'children': [], 'meta': {'background': 'BACKGROUND_TRANSPARENT'}}
-        for chart in charts[index:index + 2]:
-            width = 12 if index == 6 else (4 if chart == charts[4] else 8 if chart == charts[5] else 6)
+        for chart in row_charts:
+            width = 12 if len(row_charts) == 1 else (4 if chart == charts[4] else 8 if chart == charts[5] else 6)
             chart_id = 'CHART-' + str(chart.id)
             result[row_id]['children'].append(chart_id)
             result[chart_id] = {'id': chart_id, 'type': 'CHART', 'parents': ['ROOT_ID', 'GRID_ID', row_id],
                                 'meta': {'chartId': chart.id, 'sliceName': chart.slice_name,
-                                         'uuid': str(chart.uuid), 'width': width, 'height': 24 if index == 6 else 40}}
+                                         'uuid': str(chart.uuid), 'width': width, 'height': 24 if chart == charts[-1] else 40}}
     return result
 
 
@@ -91,13 +102,13 @@ def main():
         db.session.commit()
         for schema in ('demo', 'gold'):
             datasets = {}
-            for name in list(TABLES) + ['publication']:
+            for name in list(TABLES) + ['repository_growth_hourly', 'language_growth_hourly', 'publication']:
                 dataset = db.session.query(SqlaTable).filter_by(database_id=database.id, schema=schema, table_name=name).one_or_none()
                 if dataset is None:
                     dataset = SqlaTable(table_name=name, schema=schema, database=database, owners=[admin])
                     db.session.add(dataset)
                     db.session.commit()
-                dataset.main_dttm_col = TABLES[name]['time'] if name in TABLES else 'loaded_at'
+                dataset.main_dttm_col = TABLES[name]['time'] if name in TABLES else 'loaded_at' if name == 'publication' else 'hour_utc'
                 dataset.fetch_metadata()
                 db.session.commit()
                 datasets[name] = dataset

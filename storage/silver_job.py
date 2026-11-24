@@ -1,6 +1,7 @@
 """Validate Bronze JSONL, quarantine invalid events, and upsert valid Hudi records."""
 
 import os
+import argparse
 
 from pyspark.sql import SparkSession
 from pyspark.sql import Window
@@ -32,6 +33,9 @@ SILVER_SCHEMA = StructType(
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--hour', help='UTC source-hour identity; validate the complete Bronze snapshot')
+    parser.parse_args()
     bronze_path = os.getenv(
         "BRONZE_PATH", "hdfs://namenode:9000/lake/bronze/github_events"
     )

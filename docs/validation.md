@@ -1,4 +1,51 @@
-# v0.1 baseline verification (17 November 2026)
+# Verification history
+
+## Integrated v0.3 - 24 November 2026
+
+Merged the Part 1, Part 2, analytics/ML and Part 4 branches into
+`codex/integrated-pipeline`, retaining their commit histories. Fixed the actual
+integration gaps: Python 3.8 compatibility, ML dependencies, the missing Silver
+quality gate, executable arguments, hourly contributor output, language/cluster
+columns, complete Gold snapshots, synthetic-data isolation and dashboard growth.
+
+| Check | Observed result |
+| --- | --- |
+| Real Airflow run `integration-20261124-first` | All 11 tasks succeeded; 100 real events from UTC hour `2025-01-01-15` reached SQL Gold |
+| Real Airflow run `integration-20261124-second-day` | All 11 tasks succeeded; another 100 real events from `2025-01-02-15` published successfully |
+| Raw preservation | All 200 real source JSON lines found byte-for-byte unchanged in Bronze |
+| Hudi Silver upserts | First run: 168 raw -> 106 unique events; second: 268 raw -> 206 unique events, including the six explicit fixtures |
+| Real Gold totals | 200 events, split 100/100 across the two selected UTC hours; language and contributor totals reconcile |
+| Synthetic isolation | The six Bronze/Silver demo IDs are excluded from real analytics; SQL demo remains 85 events |
+| Real KMeans | 183 repositories; K=2 selected by silhouette 0.9558 in the second run; fitted pipeline saved on HDFS |
+| Growth | Same-hour previous-day views validated; example TypeScript 1 -> 4 sampled events gives 300% growth |
+| SQL reliability | Invalid publications and injected mid-transaction failures preserve data/provenance; dashboard reader cannot write |
+| Superset API/browser | Real total 200; native UTC filter gives 100; demo gives 85; 27 browser chart requests succeeded without query errors |
+| Unit/functional tests | 49 non-Spark tests passed on the host; all eight Spark analytics tests passed in Docker, including KMeans and hourly contributors; the five ingestion tests also passed under Docker Python 3.8 |
+| Deployment | `docker compose up --build -d` starts the complete platform by default; configuration is valid |
+| Streaming observations | Structured progress logs report committed offsets, batch counts, rates and query status |
+
+The optional standalone Silver service remains available, but complete processing
+uses the runner. All automatic hourly downloads remain paused until explicitly
+enabled; the full manual DAG exercises exactly the same eleven tasks.
+
+### What is still needed for the final submission
+
+- Test complete hourly archives and a larger multi-hour dataset. The verified
+  live inputs here were two 100-event samples, not complete archives. Current
+  serving export limits are 100,000 rows per table; batch jobs use laptop memory.
+- Improve language coverage. 158 of 200 sampled events (79%) remain `unknown`
+  because metadata is missing or not yet fetched. The default API budget is 30
+  lookups per run; optional `GITHUB_TOKEN` forwarding and cache backfill are
+  supported. More recent repositories can also improve metadata availability.
+- Verify/finalize the cahier des charges PDF, write the final results-based report
+  and slides, and rehearse startup, automatic scheduling and each member's demo.
+  These are submission requirements from the original workbook (Guide general,
+  deliverables section). This code integration does not create those documents.
+
+Small-sample model scores and observed batch rates do not establish large-volume
+capacity or representative GitHub-wide trends. Known missing values stay visible.
+
+## v0.1 baseline verification (17 November 2026)
 
 Historical Bronze-only verification on 17 November 2026 using Docker Desktop Linux
 containers. These are small functional checks, not performance or
@@ -40,7 +87,7 @@ evidence only, not a performance or production-readiness result. The current
 contract uses `event_date` partitions and deterministic `record_order`; its
 container-level Hudi behavior still needs an integration run.
 
-## Current Part 2 verification (22 November 2026)
+## Historical Part 2 verification (22 November 2026)
 
 | Check | Result |
 | --- | --- |
@@ -85,7 +132,7 @@ Repeat the service checks with the commands in
 The browser check used local headless Chromium. Superset's optional service-worker
 asset returned 404; ordinary page loading and all chart queries still succeeded.
 
-**Pending upstream integration:** reading actual Part 3 Hudi Gold tables with the
+**At the time of v0.2, pending upstream integration:** reading actual Part 3 Hudi Gold tables with the
 Spark exporter, executing the complete hourly pipeline, and validating real KMeans
 results. These require the Silver/analytics jobs; demo data does not establish
 that they work. The current downloader remains a bounded hourly sample. No

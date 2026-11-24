@@ -12,6 +12,8 @@ Run on the six-event TEST fixture with FICTIONAL languages (no network):
     python -m analytics.language_metrics --source fixture --languages fixture --output tmp/gold
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -93,6 +95,7 @@ def language_activity_hourly(silver, languages: dict):
         .agg(
             F.count("*").alias("event_count"),
             F.countDistinct("repo_name").alias("repo_count"),
+            F.countDistinct("repo_name").alias("active_repositories"),
             F.countDistinct("actor_login").alias("active_contributors"),
         )
         .withColumn("event_date", F.to_date("hour_utc"))
@@ -104,6 +107,7 @@ def main(argv=None):
     from analytics.repository_metrics import add_growth
 
     parser = argparse.ArgumentParser(description="Silver -> Gold language activity")
+    parser.add_argument('--hour', help='UTC source-hour identity; recompute the complete Silver snapshot')
     parser.add_argument("--source", default="hudi", choices=["hudi", "parquet", "fixture", "cluster-fixture"])
     parser.add_argument("--silver", default=SILVER_PATH)
     parser.add_argument("--output", default=GOLD_PATH)

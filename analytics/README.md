@@ -1,67 +1,12 @@
-# Analytics
-
-`read_silver.py` is the Part 3 Spark/Hudi integration check. It loads the Silver
-table, verifies the documented schema, and reports a count by event type. Run it
-after `docker compose run --rm spark-silver`:
-
-```sh
-docker compose run --rm --entrypoint /opt/spark/bin/spark-submit spark-silver \
-  --master local[2] \
-  --driver-memory 768m \
-  --conf spark.jars.ivy=/tmp/ivy \
-  --conf spark.jars.ivySettings=/opt/project/storage/ivysettings.xml \
-  --conf spark.driver.host=spark-silver \
-  --py-files /opt/project/storage/silver_contract.py,/opt/project/storage/hudi_io.py \
-  --packages org.apache.hudi:hudi-spark3.5-bundle_2.12:0.15.0 \
-  /opt/project/analytics/read_silver.py
-```
-
-Gold Hudi aggregates, repository feature engineering, and MLlib KMeans remain
-planned. See `docs/data-contract.md` for the shared schema and analytics
-definitions.
-
-## Handoff contract
-
-- Hudi table: `github_events_silver`
-- HDFS base path: `hdfs://namenode:9000/lake/silver/github_events`
-- Record key: `event_id`; partitions: UTC `event_date`
-- Current columns: `event_id` (string), `event_type` (string), `actor_id`
-  (bigint, nullable), `actor_login` (string), `repository_id` (bigint, nullable),
-  `repo_name` (string), `created_at` (UTC timestamp), `event_date` (date),
-  `ingested_at` (timestamp), `payload_json` (exact original event JSON), and
-  `record_order` (string used for deterministic Hudi precombine).
-
-The first sample Silver row has `event_id=demo-001`, `event_type=PushEvent`,
-`actor_login=demo-alice`, `repository_id=201`, `repo_name=demo-org/alpha`, and
-`created_at=2025-01-01 15:00:00 UTC`. Its `event_date` is `2025-01-01`; its
-`payload_json` preserves the full corresponding line in the sample fixture.
-`ingested_at` reflects when that run executes.
-
-For a Spark application launched with Hudi and `hudi_io.py` on `--py-files`:
-
-```python
-from hudi_io import read_silver
-
-events = read_silver(
-    spark,
-    "hdfs://namenode:9000/lake/silver/github_events",
-)
-events.select("event_id", "event_type", "repo_name", "created_at").show()
-```
-
-`analytics/read_silver.py` is the completion check: it verifies required column
-names and Spark types, rejects null or duplicate event IDs, then prints the
-current row count and counts by event type. Replaying the same source IDs updates
-the current Hudi rows instead of adding another current row per ID.
 # Analytics (Part 3): Silver -> Gold
 
 Spark SQL aggregates, language enrichment and MLlib KMeans. Each job reads the
 Silver table, computes one or more Gold tables, and writes them with a record key
-so a rerun **upserts** instead of appending (reprocessing never inflates results).
+and publishes a complete Hudi snapshot (reprocessing never inflates results).
 
 | Job | Gold table(s) | Module |
 | --- | --- | --- |
-| Repository metrics | `repository_activity_hourly`, `contributor_rankings_daily` | `analytics/repository_metrics.py` |
+| Repository metrics | `repository_activity_hourly`, `contributor_activity_hourly`, `contributor_rankings_daily` | `analytics/repository_metrics.py` |
 | Language metrics | `language_activity_hourly` | `analytics/language_metrics.py` |
 | Clustering | `repository_clusters` (+ settings JSON) | `analytics/cluster_repositories.py` |
 | Shared I/O | Silver reader, Gold writer, table keys | `analytics/gold_io.py` |
@@ -77,7 +22,7 @@ Example exports produced from the **test fixtures** (not real activity):
   `hdfs://namenode:9000/lake/silver/github_events`, one row per `event_id`, with the
   Silver columns in the data contract (`created_at` UTC timestamp, `event_date` date).
   If Part 2 provides `storage/hudi_io.py` with `read_silver(spark, path)`, the jobs use
-  it automatically (`--source hudi`). The jobs still deduplicate on `event_id` defensively.
+  it automatically (`--source hudi`). The jobs still deduplicate on `event_id` defensively. Known fictional sample IDs are excluded from real Hudi analytics.
 - **Hudi bundle:** the same Hudi version Part 2 selects for Spark 3.5.1.
 - **Network (language job only):** `api.github.com`. Optional `GITHUB_TOKEN`
   environment variable for a higher rate limit. Never commit a token.
@@ -110,7 +55,7 @@ the same hour has finished.
 
 Defaults: `--silver hdfs://namenode:9000/lake/silver/github_events`,
 `--output hdfs://namenode:9000/lake/gold`. Language job options: `--offline` (cache
-only), `--max-requests 500` (API calls per run), `--cache data/cache/repo_languages.json`.
+only), `--max-requests 500` (API calls per run), `--cache /opt/project/data/runtime/cache/repo_languages.json`.
 Clustering options: `--k N` forces K, `--max-k 6`, `--model-path hdfs://...` saves the
 fitted pipeline.
 
@@ -142,3 +87,23 @@ for Part 4 to add, so edits to the shared `docker-compose.yml` stay coordinated.
 - **KMeans features** are `log1p` counts + event-type shares, standardized; K chosen
   by silhouette (seed 42). Labels are generated from each cluster's mean features
   relative to the overall mean, and saved in the settings JSON.
+
+## Integrated behavior
+
+All three jobs accept `--hour YYYY-MM-DD-HH` as a stable source/snapshot identity.
+They recompute the complete current Silver history rather than filtering to one
+hour, preserving trend baselines. Gold uses `insert_overwrite_table` to remove
+stale grouping keys after enrichment changes. Silver's actual repository ID field
+is `repository_id`; analytics uses event IDs, repository names, actors and UTC dates.
+
+The extra hourly contributor table matches the dashboard contract. Language rows
+include `active_repositories` alongside `repo_count`. Clusters include
+`snapshot_utc` alongside period bounds and labels. Model settings and the language
+cache live in the persistent runtime volume; Airflow also saves the fitted model
+to `/lake/models/repository-kmeans`. KMeans runs with each integrated pipeline run.
+
+Use `docker compose exec -T airflow python -m orchestration.verify_pipeline` to
+exercise the complete deployed chain. The runner supplies Spark 3.5.1, Hudi 0.15,
+NumPy and SciPy; its Python interpreter is 3.8, so postponed annotations are used.
+See the root README for actual Docker test commands. `analytics/read_silver.py`
+remains the standalone Part 2 handoff reader.

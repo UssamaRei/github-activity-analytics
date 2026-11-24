@@ -6,6 +6,8 @@ Silver columns in docs/data-contract.md and are deduplicated on `event_id`,
 as Silver will be. Never present results computed from them as real activity.
 """
 
+from __future__ import annotations
+
 import json
 import random
 from datetime import datetime, timedelta, timezone
