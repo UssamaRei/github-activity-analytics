@@ -19,3 +19,7 @@ data/runtime/
 *.aux
 *.out
 *.toc
+
+# Analytics: real language metadata cache and local model settings
+data/cache/
+data/models/

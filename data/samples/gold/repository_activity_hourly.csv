@@ -1,0 +1,3 @@
+repo_name,hour_utc,event_count,push_count,pr_count,issue_count,active_contributors,event_date,previous_event_count,growth_pct
+demo-org/alpha,2025-01-01 15:00:00,4,2,0,2,3,2025-01-01,,
+demo-org/beta,2025-01-01 15:00:00,2,1,1,0,2,2025-01-01,,

@@ -1,0 +1,4 @@
+event_date,actor_login,event_count,repo_count,rank
+2025-01-01,demo-alice,2,2,1
+2025-01-01,demo-bob,2,1,1
+2025-01-01,demo-charlie,2,2,1

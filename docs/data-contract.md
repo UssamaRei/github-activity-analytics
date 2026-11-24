@@ -68,6 +68,11 @@ These conventions describe how components connect. They do not assign work.
 | `hdfs://namenode:9000/lake/gold/language_activity_hourly` | Planned: Hudi language aggregates |
 | `hdfs://namenode:9000/lake/gold/repository_clusters` | Planned: KMeans results |
 | `hdfs://namenode:9000/lake/gold/contributor_activity_hourly` | Planned: contributor activity for the dashboard |
+| `hdfs://namenode:9000/lake/silver/github_events` | Planned: Hudi table `github_events_silver` |
+| `hdfs://namenode:9000/lake/gold/repository_activity_hourly` | Job ready (`analytics/`); Hudi run pending Silver |
+| `hdfs://namenode:9000/lake/gold/contributor_rankings_daily` | Job ready (`analytics/`); Hudi run pending Silver |
+| `hdfs://namenode:9000/lake/gold/language_activity_hourly` | Job ready (`analytics/`); Hudi run pending Silver |
+| `hdfs://namenode:9000/lake/gold/repository_clusters` | Job ready (`analytics/`); Hudi run pending Silver |
 
 The streaming query starts at earliest retained Kafka offsets only for its **first**
 run. Subsequent runs resume the checkpoint. Kafka keeps approximately 24 hours of
@@ -133,3 +138,52 @@ schemas, executable-job adapters and SQL publication are defined in
 [part4-integration.md](part4-integration.md). PostgreSQL serves checked Gold exports
 to Superset. A separate `demo` schema contains a labeled fixture; real `gold` starts
 empty until the actual Hudi outputs are provided by Parts 2/3.
+- KMeans groups repositories by documented activity features; it is not a
+  prediction model. Selected: features `event_count`, `active_contributors`,
+  `push_share`, `pr_share`, `issue_share` over a UTC period; `log1p` on the two
+  counts, then `StandardScaler` (mean 0, std 1); K chosen by best silhouette in
+  [2, 6] unless forced; seed 42. Settings and cluster explanations are saved as JSON.
+
+## Gold tables
+
+Produced by `analytics/` (see [analytics/README.md](../analytics/README.md) for
+commands). All tables live under `hdfs://namenode:9000/lake/gold/<table>`, are Hudi
+upserts keyed as below with `computed_at` as precombine column, and are partitioned
+by the listed date column (Hive-style). Example exports from **test fixtures**:
+`data/samples/gold/`.
+
+| Table | Record key | Partition |
+| --- | --- | --- |
+| `repository_activity_hourly` | `hour_utc`, `repo_name` | `event_date` |
+| `contributor_rankings_daily` | `event_date`, `actor_login` | `event_date` |
+| `language_activity_hourly` | `hour_utc`, `language` | `event_date` |
+| `repository_clusters` | `period_end`, `repo_name` | `period_end` |
+
+**repository_activity_hourly:** `hour_utc` (timestamp, UTC hour start), `repo_name`,
+`event_count`, `push_count`, `pr_count`, `issue_count`, `active_contributors` (long),
+`event_date` (date), `previous_event_count` (long, nullable), `growth_pct` (double,
+nullable), `computed_at` (timestamp).
+
+**contributor_rankings_daily:** `event_date`, `actor_login`, `event_count`,
+`repo_count` (distinct repositories), `rank` (1 = most events that UTC day; ties share
+a rank), `computed_at`.
+
+**language_activity_hourly:** `hour_utc`, `language` (GitHub primary language or
+`unknown`), `event_count`, `repo_count`, `active_contributors` (distinct actors across
+that language's repositories), `event_date`, `previous_event_count`, `growth_pct`,
+`computed_at`.
+
+**repository_clusters:** `period_start`, `period_end` (dates), `repo_name`,
+`cluster_id`, `cluster_label` (readable description), `event_count`,
+`active_contributors`, `push_share`, `pr_share`, `issue_share` (raw, unscaled),
+`k`, `silhouette`, `computed_at`.
+
+**Growth:** `growth_pct = (event_count - previous_event_count) / previous_event_count * 100`,
+rounded to 2 decimals, where `previous_event_count` is the value for the **same key
+and same UTC hour one day earlier**. Null when that earlier row does not exist (the
+hour may not have been ingested) or is 0.
+
+**Language enrichment:** `GET https://api.github.com/repos/{repo_name}` -> `language`,
+cached in `data/cache/repo_languages.json` (git-ignored). 404/451 or a null language
+are cached as unknown; temporary failures (rate limit, network, 5xx) are not cached
+and are retried on the next run.
