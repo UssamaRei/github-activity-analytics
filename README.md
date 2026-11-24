@@ -1,6 +1,6 @@
 # IL-05 - GitHub Open Source Activity Analytics
 
-**v0.2: ingestion-to-Bronze plus Part 4 Airflow/Superset integration.**
+**Integration branch: ingestion, Bronze/Silver and Airflow/Superset.**
 
 Université Ibn Zohr - Faculté des Sciences Agadir
 Master Excellence Ingénierie Logicielle - Module Big Data
@@ -17,16 +17,19 @@ Six fictional sample events (or a real GH Archive sample)
     -> Apache Kafka topic github_events
     -> Spark Structured Streaming
     -> HDFS Bronze (original JSON records)
+    -> rerunnable Spark validation job
+       -> Hudi Silver (deduplicated current events)
+       -> HDFS quarantine (invalid raw records and reasons)
 ```
 
 Implemented: multi-hour GH Archive downloader, checkpointed Kafka publication, HDFS storage,
-checkpointed Spark streaming, a synthetic fixture, tests, CI, and connection conventions.
+checkpointed Spark streaming, Hudi Silver upserts and quarantine, tests and CI.
 
-**Not implemented yet:** Hudi Silver/Gold, Spark analytical jobs and KMeans,
+**Integration in progress:** Hudi Gold, Spark analytical jobs and KMeans,
 and language metadata enrichment. Airflow, Superset and PostgreSQL serving are
 available through the `part4` Compose profile. Real Gold stays empty until the
 upstream jobs are connected.
-Empty Silver/Gold directories are reserved paths only. This is not the finished
+Gold directories are reserved paths until analytics runs. This is not the finished
 academic submission. See [roadmap](docs/roadmap.md).
 
 ## Part 4: automation and dashboard
@@ -56,7 +59,8 @@ should include the full local platform.
 ## Quick start (PowerShell or a terminal)
 
 Requirements: Docker Desktop running Linux containers, Docker Compose, and an
-internet connection for the initial images, pip package, and Spark connector jars.
+internet connection for the initial images, pip package, Spark connector jars,
+and Hudi package.
 Check free disk space first. Initial downloads can require several GB on a clean
 machine. The running demo is configured for roughly 4 GB of container memory limits;
 leave headroom for Docker and Windows. Ports 29092 and 9870 must be available.
@@ -74,6 +78,61 @@ The first startup may take several minutes. The `producer`, `kafka-init`,
 they are one-shot tasks.
 Kafka, NameNode, DataNode, and the streaming consumer keep running.
 The producer publishes the six fictional sample events automatically.
+
+### Monitor Bronze streaming
+
+Each query lifecycle/status update and completed micro-batch is logged as a
+timestamped `STREAMING_METRIC` JSON record. The records include input counts,
+rates, trigger execution duration, and Kafka offset ranges. To summarize recent
+batches:
+
+```sh
+docker compose logs --since 30m --no-color spark-bronze | python3 scripts/streaming_report.py
+```
+
+Inspect live records with `docker compose logs -f --no-color spark-bronze`.
+Check container resource use with
+`docker stats --no-stream spark-bronze kafka namenode datanode` and Docker's
+overall allocation with `docker info`. Monitoring is log-only; it does not alter
+the Bronze checkpoint or the existing 5-second trigger.
+
+Build Silver and verify that replayed IDs do not increase its current row count:
+
+```powershell
+docker compose run --rm spark-silver
+docker compose run --rm --entrypoint /opt/spark/bin/spark-submit spark-silver --master 'local[2]' --driver-memory 768m --conf spark.jars.ivy=/tmp/ivy --conf spark.jars.ivySettings=/opt/project/storage/ivysettings.xml --conf spark.driver.host=spark-silver --py-files /opt/project/storage/silver_contract.py,/opt/project/storage/hudi_io.py --packages org.apache.hudi:hudi-spark3.5-bundle_2.12:0.15.0 /opt/project/analytics/read_silver.py
+docker compose exec namenode hdfs dfs -ls -R /lake/silver/github_events
+```
+
+The Part 3 reader checks the Silver schema, rejects null or duplicate event IDs,
+and reports the current row count and event-type counts. To verify replay safety,
+replay the six sample records, rerun `spark-silver`, and run the reader again; the
+fixture produces six current event IDs regardless of Bronze replay copies. See
+[analytics/README.md](analytics/README.md) for the reader interface and schema.
+
+### Part 2 manual verification sequence
+
+```sh
+docker compose up --build -d
+# hdfs-init runs automatically; this confirms the directories are present.
+docker compose exec namenode hdfs dfs -ls /lake/bronze /lake/silver /lake/quarantine
+python3 scripts/verify_bronze.py
+docker compose exec namenode hdfs dfs -cat '/lake/bronze/github_events/part-*'
+docker compose run --rm spark-silver
+docker compose exec namenode hdfs dfs -ls -R /lake/silver/github_events
+# Run the Spark/Hudi reader command shown above.
+docker compose run --rm producer
+docker compose run --rm spark-silver
+# Run the Spark/Hudi reader again; current Silver should still report 6 sample IDs.
+docker compose restart spark-bronze
+docker compose run --rm producer
+python3 scripts/verify_bronze.py
+```
+
+The final restart/replay check confirms the stream resumes from its HDFS
+checkpoint and consumes new offsets without replaying prior offsets. Bronze
+contains additional raw rows after the explicit producer runs; Silver remains
+one current row per event ID.
 
 With Python 3.11+ installed on the host, verify the result:
 
@@ -101,8 +160,9 @@ python scripts/verify_bronze.py
 ```
 
 A replay intentionally creates more raw records with the same event IDs in Bronze.
-Silver will deduplicate/upsert them in the next iteration. Do not present duplicate
-raw events as additional unique GitHub activity.
+Re-run `docker compose run --rm spark-silver` to upsert the repeated IDs without
+increasing the number of current Silver records. Do not present duplicate raw
+events as additional unique GitHub activity.
 
 ## Download and publish selected GH Archive hours
 
@@ -158,7 +218,7 @@ Kafka records, HDFS files, checkpoints, and cached connector jars.
 ## Structure and shared conventions
 
 - `ingestion/`: downloader, JSONL reader, and Kafka producer.
-- `storage/`: working Bronze streaming job; Hudi layers to follow.
+- `storage/`: Bronze streaming and the Silver Hudi upsert/quarantine job.
 - `analytics/`: interfaces for the upcoming Gold jobs.
 - `orchestration/`: Airflow workflows, private job runner and integration checks.
 - `dashboard/`: Gold export, transactional PostgreSQL publication and Superset dashboards.

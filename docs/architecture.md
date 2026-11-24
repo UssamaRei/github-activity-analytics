@@ -12,6 +12,8 @@ flowchart LR
     R -. publish and verify committed offsets .-> K
     R --> D[PostgreSQL demo: synthetic fixture]
     D --> SU[Superset demo dashboard]
+    H --> SI[Optional rerunnable Hudi Silver job]
+    SI --> Q[HDFS quarantine for invalid events]
 ```
 
 Docker Compose starts Kafka, a topic initializer, an HDFS NameNode and DataNode,
@@ -19,6 +21,8 @@ an HDFS directory initializer, a Spark dependency-cache initializer, the streami
 job, and a one-shot sample producer.
 The streaming consumer starts at earliest offsets, so it can read the sample even
 if the producer finishes first. Everything belongs to the Compose project `il05`.
+Silver is an explicit one-shot service (`docker compose run --rm spark-silver`);
+it is not started by the default `docker compose up`.
 
 HDFS is an explicit option in the general guide. The first development machine
 already has the Hadoop images, so this choice avoids downloading another storage
@@ -43,7 +47,7 @@ flowchart LR
     AF -. processing and quality .-> SP
 ```
 
-Silver, analytics and KMeans remain to be implemented by Parts 2/3. Part 4 supplies
+Silver is implemented as a rerunnable Hudi job. Analytics integration is in progress. Part 4 supplies
 the job adapters, exporter, SQL publisher, three DAGs and reproducible dashboards.
 The real Gold dashboard remains empty until upstream jobs supply valid results.
 All services use the same Compose network; Airflow does not mount a Docker socket.

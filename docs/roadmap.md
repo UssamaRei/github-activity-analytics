@@ -4,8 +4,8 @@ The group agrees individual responsibilities separately from this technical road
 
 1. **v0.1: shared foundation** - repository, event contract, sample, Kafka producer,
    Spark streaming to raw HDFS Bronze, local tests and integration verification.
-2. **Silver lakehouse** - Hudi configuration compatible with Spark 3.5, cleaning,
-   event-ID deduplication/upserts, quality reporting, replay/idempotency tests.
+2. **Silver lakehouse (implemented)** - Spark 3.5/Hudi Copy-on-Write table,
+   event-ID upserts, invalid-event quarantine, and replay/schema/read checks.
 3. **Gold analytics** - Spark SQL rankings and trends; repository language enrichment;
    Gold Hudi metrics; MLlib KMeans features, training, and evaluation.
 4. **Automation and visualization (v0.2)** - implemented sample/demo Airflow workflows,
